@@ -19,12 +19,13 @@ if (proxy.Authority is { } authority) {
 	Console.WriteLine($"  Root certificate: {authority.RootCertificatePath}");
 	Console.WriteLine("  Keep the folder private: its private key can impersonate any website to a client that trusts it.");
 	string chrome = ChromeLauncher.FindChrome();
-	Console.WriteLine("  Option 1: start a test Chrome that trusts it, without installing anything (Chrome shows a warning bar).");
+	Console.WriteLine("  Option 1: start a throwaway test Chrome that accepts the proxy's certificates. It ignores ALL certificate errors,");
+	Console.WriteLine("  so use that window only for browsing through this proxy (Chrome shows a warning bar).");
 	Console.WriteLine("  In PowerShell:");
-	Console.WriteLine($"    {ChromeLauncher.PowerShellCommand(chrome, proxy.Port, authority.SpkiSha256Base64)}");
+	Console.WriteLine($"    {ChromeLauncher.PowerShellCommand(chrome, proxy.Port)}");
 	Console.WriteLine("  In Command Prompt:");
-	Console.WriteLine($"    {ChromeLauncher.CmdCommand(chrome, proxy.Port, authority.SpkiSha256Base64)}");
-	Console.WriteLine("  Option 2: install it for your Windows user, so every browser trusts it (a confirmation dialog appears;");
+	Console.WriteLine($"    {ChromeLauncher.CmdCommand(chrome, proxy.Port)}");
+	Console.WriteLine("  Option 2: install the root for your Windows user, so every browser really trusts it (a confirmation dialog appears;");
 	Console.WriteLine("  remove it later with: certutil -user -delstore Root \"mos Proxy Root CA (local test CA)\"):");
 	Console.WriteLine($"    certutil -user -addstore Root \"{authority.RootCertificatePath}\"");
 	Console.WriteLine();

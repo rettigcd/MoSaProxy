@@ -129,19 +129,4 @@ public class CertificateAuthorityTests {
 		other.Thumbprint.ShouldNotBe(first.Thumbprint);
 	}
 
-	[Fact]
-	public void SpkiSha256Base64_Root_IsTheHashOfItsPublicKey() {
-
-		// Given: a certificate authority
-		using var folder = new TempFolder();
-		var authority = CertificateAuthority.LoadOrCreate(folder.Path);
-
-		// When: its SPKI hash is read and also computed independently
-		var reported = authority.SpkiSha256Base64;
-		var expected = Convert.ToBase64String(SHA256.HashData(authority.Root.PublicKey.ExportSubjectPublicKeyInfo()));
-
-		// Then: they match, and the value is a 32-byte hash in Base64 (44 characters)
-		reported.ShouldBe(expected);
-		reported.Length.ShouldBe(44);
-	}
 }

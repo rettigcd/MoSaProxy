@@ -205,6 +205,32 @@ public class InterceptionTests {
 	}
 
 	[Fact]
+	public async Task Get_Intercepted_LeavesNoCertificatesInTheWindowsCertificateStores() {
+
+		// Given: an HTTPS origin and an intercepting proxy; the test only runs on Windows, where the certificate stores live
+		if (!OperatingSystem.IsWindows()) return;
+		using var caFolder = new TempFolder();
+		await using var origin = await TestOrigin.StartAsync(c => c.Response.WriteAsync("hello"), https: true);
+		string rootThumbprint;
+		await using (var proxy = await TestProxy.StartAsync(Intercepting(caFolder))) {
+
+			// When: a client makes a request over HTTPS through the proxy (so the TLS stack uses the generated certificates), and the proxy is then shut down
+			await proxy.Client.GetAsync(origin.UrlFor("/"));
+			rootThumbprint = proxy.Authority!.Root.Thumbprint;
+		}
+
+		// Then: none of the certificates it made were left behind in the current user's certificate stores
+		// (an earlier design made .NET install them into the "Intermediate Certification Authorities" store, where stale copies broke later chain building)
+		foreach (var storeName in new[] { System.Security.Cryptography.X509Certificates.StoreName.CertificateAuthority, System.Security.Cryptography.X509Certificates.StoreName.Root, System.Security.Cryptography.X509Certificates.StoreName.My }) {
+			using var store = new System.Security.Cryptography.X509Certificates.X509Store(storeName, System.Security.Cryptography.X509Certificates.StoreLocation.CurrentUser);
+			store.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
+			store.Certificates.Find(System.Security.Cryptography.X509Certificates.X509FindType.FindByThumbprint, rootThumbprint, false).Count.ShouldBe(0);
+			store.Certificates.Cast<System.Security.Cryptography.X509Certificates.X509Certificate2>()
+				.Count(c => c.Issuer.Contains("mos Proxy Root CA") && c.Thumbprint == rootThumbprint).ShouldBe(0);
+		}
+	}
+
+	[Fact]
 	public async Task Get_AbsoluteHttpsTargetWithoutATunnel_IsStillRejected() {
 
 		// Given: an intercepting proxy

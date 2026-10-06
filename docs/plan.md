@@ -200,8 +200,19 @@ the root is stored (default `%LOCALAPPDATA%\mos\ca`, outside the repository).
 - The origin's certificate is validated normally; an untrusted origin certificate gives the client a 502.
 - A client that does not trust the root is detected as a read failure on the decrypted stream right after the
   handshake (TLS 1.3 lets the server finish its side first) and logged as a TLS failure with a hint.
-- For a test Chrome, startup prints the `--ignore-certificate-errors-spki-list` flag that trusts the root without
-  installing it, plus the `certutil` command for installing it for the current Windows user.
+- Making Chrome trust the proxy: startup prints (1) a command for a throwaway Chrome profile started with
+  `--ignore-certificate-errors` (use that window only for browsing through the proxy), and (2) the `certutil`
+  command for installing the root for the current Windows user, which gives real trust in every browser.
+- Lessons learned while getting Chrome to work (so they are not repeated):
+  - Chrome's `--ignore-certificate-errors-spki-list` only matches certificates the server actually sends in the
+    handshake, and a self-signed root is never sent, so passing the root's hash does nothing. (With the host
+    certificate's own hash it works, but that changes per host.) It is not used.
+  - Sending a root or intermediate on Windows means giving .NET's `SslStreamCertificateContext` extra
+    certificates, and it installs them into the user's `CurrentUser\CA` certificate store as a side effect. Stale
+    copies with the same subject name then break later chain building (`NotSignatureValid`). A two-level CA built
+    on this was tried and dropped. A test checks that the proxy leaves no certificates in the user's stores.
+  - The headless Chrome net-log (`--log-net-log=file --net-log-capture-mode=Everything`) shows the exact
+    certificate verification result and is the quickest way to diagnose a certificate error.
 - Not done yet: automatic fallback to a blind tunnel for hosts whose handshake fails (certificate pinning).
   Use `--intercept-bypass` for those hosts for now.
 

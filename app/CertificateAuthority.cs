@@ -32,10 +32,6 @@ public sealed class CertificateAuthority {
 	/// <summary>Path of the root certificate without its private key (.cer), for installing into a trust store.</summary>
 	public string RootCertificatePath { get; }
 
-	/// <summary>Base64 SHA-256 of the root's public key, as used by Chrome's --ignore-certificate-errors-spki-list.</summary>
-	public string SpkiSha256Base64 =>
-		Convert.ToBase64String(SHA256.HashData(Root.PublicKey.ExportSubjectPublicKeyInfo()));
-
 	/// <summary>Loads the root from <paramref name="directory"/>, creating and saving a new one if there is none.</summary>
 	public static CertificateAuthority LoadOrCreate(string directory) {
 		System.IO.Directory.CreateDirectory(directory);
