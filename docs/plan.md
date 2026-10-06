@@ -175,7 +175,7 @@ It peeks at the first bytes of each connection, takes over those that begin with
 else to Kestrel unchanged. This is also the hook point for the Phase 6 wire tap (option A).
 Kestrel's `ConnectionClosed` token fires as soon as the client half-closes, so tunnels are not tied to it; they end
 when the origin closes, on error, after an idle timeout (`TunnelIdleTimeout`, default 5 minutes), or at proxy shutdown.
-Connecting to the origin times out after `ConnectTimeout` (default 15 seconds). TLS SNI is not logged (it would
+Connecting to the origin times out after `ConnectTimeout` (default 15 seconds, set with `--connect-timeout SECONDS`). TLS SNI is not logged (it would
 require parsing the ClientHello); that is left for Phase 3, where TLS is terminated anyway.
 
 - Implement `CONNECT`: connect to the target, reply `200 Connection Established`, then relay bytes both ways.

@@ -60,6 +60,53 @@ public class ProxyOptionsTests {
 		options.CaptureMaxBodyBytes.ShouldBeNull();
 	}
 
+	[Fact]
+	public void Parse_NoConnectTimeoutArgument_UsesTheDefaultOf15Seconds() {
+
+		// Given: no command-line arguments
+		var args = Array.Empty<string>();
+
+		// When: the options are parsed
+		var options = ProxyOptions.Parse(args);
+
+		// Then: the tunnel connect timeout is 15 seconds
+		options.ConnectTimeout.ShouldBe(TimeSpan.FromSeconds(15));
+	}
+
+	[Theory]
+	[InlineData("5", 5.0)]
+	[InlineData("2.5", 2.5)]
+	[InlineData("0.5", 0.5)]
+	public void Parse_ConnectTimeoutArgument_SetsTheTimeoutInSeconds(string value, double expectedSeconds) {
+
+		// Given: an argument setting the connect timeout to the given number of seconds
+		var args = new[] { "--connect-timeout", value };
+
+		// When: the options are parsed
+		var options = ProxyOptions.Parse(args);
+
+		// Then: the connect timeout is that many seconds
+		options.ConnectTimeout.ShouldBe(TimeSpan.FromSeconds(expectedSeconds));
+	}
+
+	[Theory]
+	[InlineData("--connect-timeout")]
+	[InlineData("--connect-timeout", "0")]
+	[InlineData("--connect-timeout", "-3")]
+	[InlineData("--connect-timeout", "soon")]
+	[InlineData("--connect-timeout", "99999")]
+	public void Parse_InvalidConnectTimeout_Throws(params string[] args) {
+
+		// Given: a connect timeout argument that is missing, zero, negative, not a number, or absurdly large
+		// (supplied by the test data)
+
+		// When: the options are parsed
+		var parse = () => ProxyOptions.Parse(args);
+
+		// Then: parsing fails with an ArgumentException
+		Should.Throw<ArgumentException>(parse);
+	}
+
 	[Theory]
 	[InlineData("--capture")]
 	[InlineData("--capture-max-body")]

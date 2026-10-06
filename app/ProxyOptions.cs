@@ -12,7 +12,9 @@ public sealed class ProxyOptions {
 	public TimeSpan UpstreamTimeout { get; init; } = TimeSpan.FromSeconds(100);
 
 	/// <summary>How long to wait when opening a connection to the origin for a CONNECT tunnel.</summary>
-	public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(15);
+	public TimeSpan ConnectTimeout { get; init; } = DefaultConnectTimeout;
+
+	public static readonly TimeSpan DefaultConnectTimeout = TimeSpan.FromSeconds(15);
 
 	/// <summary>A tunnel with no data moving in either direction for this long is closed.</summary>
 	public TimeSpan TunnelIdleTimeout { get; init; } = TimeSpan.FromMinutes(5);
@@ -28,6 +30,7 @@ public sealed class ProxyOptions {
 		string? logPath = null;
 		string? captureDirectory = null;
 		long? captureMaxBody = null;
+		var connectTimeout = DefaultConnectTimeout;
 		for (int i = 0; i < args.Length; i++) {
 			switch (args[i]) {
 				case "--port":
@@ -47,10 +50,17 @@ public sealed class ProxyOptions {
 						throw new ArgumentException("--capture-max-body requires a number of bytes (0 or more).");
 					captureMaxBody = max;
 					break;
+				case "--connect-timeout":
+					if (i + 1 >= args.Length
+						|| !double.TryParse(args[++i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double seconds)
+						|| seconds <= 0 || seconds > 3600)
+						throw new ArgumentException("--connect-timeout requires a number of seconds greater than 0 (up to 3600).");
+					connectTimeout = TimeSpan.FromSeconds(seconds);
+					break;
 				default:
-					throw new ArgumentException($"Unknown argument '{args[i]}'. Usage: mos [--port N] [--log FILE] [--capture DIR] [--capture-max-body BYTES]");
+					throw new ArgumentException($"Unknown argument '{args[i]}'. Usage: mos [--port N] [--log FILE] [--capture DIR] [--capture-max-body BYTES] [--connect-timeout SECONDS]");
 			}
 		}
-		return new ProxyOptions { Port = port, LogPath = logPath, CaptureDirectory = captureDirectory, CaptureMaxBodyBytes = captureMaxBody };
+		return new ProxyOptions { Port = port, LogPath = logPath, CaptureDirectory = captureDirectory, CaptureMaxBodyBytes = captureMaxBody, ConnectTimeout = connectTimeout };
 	}
 }
