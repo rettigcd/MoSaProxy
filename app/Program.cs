@@ -18,9 +18,14 @@ if (proxy.Authority is { } authority) {
 	Console.WriteLine("HTTPS interception is ON. Clients must trust the mos root certificate or they will show certificate errors.");
 	Console.WriteLine($"  Root certificate: {authority.RootCertificatePath}");
 	Console.WriteLine("  Keep the folder private: its private key can impersonate any website to a client that trusts it.");
-	Console.WriteLine("  Trust it for a test Chrome only (no install; Chrome shows a warning bar):");
-	Console.WriteLine($"    chrome.exe --user-data-dir=\"%TEMP%\\chrome-mos\" --proxy-server=\"http://127.0.0.1:{proxy.Port}\" --ignore-certificate-errors-spki-list={authority.SpkiSha256Base64}");
-	Console.WriteLine("  Or install it for your Windows user (a confirmation dialog appears; remove it later with certutil -user -delstore Root \"mos Proxy Root CA (local test CA)\"):");
+	string chrome = ChromeLauncher.FindChrome();
+	Console.WriteLine("  Option 1: start a test Chrome that trusts it, without installing anything (Chrome shows a warning bar).");
+	Console.WriteLine("  In PowerShell:");
+	Console.WriteLine($"    {ChromeLauncher.PowerShellCommand(chrome, proxy.Port, authority.SpkiSha256Base64)}");
+	Console.WriteLine("  In Command Prompt:");
+	Console.WriteLine($"    {ChromeLauncher.CmdCommand(chrome, proxy.Port, authority.SpkiSha256Base64)}");
+	Console.WriteLine("  Option 2: install it for your Windows user, so every browser trusts it (a confirmation dialog appears;");
+	Console.WriteLine("  remove it later with: certutil -user -delstore Root \"mos Proxy Root CA (local test CA)\"):");
 	Console.WriteLine($"    certutil -user -addstore Root \"{authority.RootCertificatePath}\"");
 	Console.WriteLine();
 }
