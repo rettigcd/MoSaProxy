@@ -71,7 +71,55 @@ Status, RequestHeaders, ResponseHeaders, RequestBytes, ResponseBytes, DurationMs
 - A structured sink (JSON Lines file) is added next.
 - Bodies are off by default, then optionally captured with a size cap, to avoid memory blow-ups and
   accidental storage of secrets.
-- Redact `Authorization`, `Cookie` and `Set-Cookie` values by default.
+- Nothing is redacted. The JSONL log records `Authorization`, `Cookie` and `Set-Cookie` values as they appear,
+  the same as session capture (decision 5). Treat log files as sensitive.
+
+### 5. Session capture and `.saz` output
+
+Eventual goal: save a `.saz` file like Fiddler does, so sessions can be opened in Fiddler and similar tools.
+A `.saz` is a zip archive. Each request/response exchange is stored as three files, numbered from 1:
+
+| File | Contents |
+|---|---|
+| `1_c.txt` | Raw bytes sent by the client (request line, headers, body) |
+| `1_s.txt` | Raw bytes sent by the server (status line, headers, body) |
+| `1_m.xml` | Metadata about the exchange (timings, client/server endpoints, flags, and so on) |
+
+(Fiddler puts these under a `raw/` folder inside the zip, alongside a `[Content_Types].xml`. Confirm the exact
+layout and the `_m.xml` schema against a real `.saz` file before implementing the final writer.)
+
+Two-step approach:
+
+1. **Intermediate step: capture folder (Phase 1b).** The same three files per exchange are written directly into a
+   sub-folder of the logging directory. Each run creates its own sub-folder, and files are numbered starting at 1
+   and incrementing with every exchange (`1_c.txt`, `1_s.txt`, `1_m.xml`, `2_c.txt`, ...). This is easy to inspect
+   and debug, and the file format is already the one the `.saz` needs.
+2. **Final step: `.saz` writer (Phase 5).** Zip the capture folder's contents into a `.saz`, either on shutdown,
+   on demand, or as a command that converts an existing run folder.
+
+Design points to settle during Phase 1b:
+
+- **Raw bytes versus reconstructed bytes.** The end goal is to capture exactly what is on the wire, not a
+  reconstruction. Kestrel parses requests before our handler sees them, so while we build on Kestrel the files
+  are a faithful reconstruction: request/status line, headers in the order received, a blank line, then the body.
+  For HTTP/2 the headers are rendered in HTTP/1.1 text form (Fiddler does the same). This is a deliberate
+  stop-gap: Phase 6 replaces or taps Kestrel to get byte-exact capture. Keep the capture code behind a small
+  interface (for example `ISessionCapture`) so that the source of the bytes can change without touching the
+  rest of the proxy.
+- **Bodies.** Capture needs the full request and response bodies, streamed to disk while they are forwarded (not
+  buffered in memory), with an optional size cap. Bodies are stored as received: still compressed if the origin
+  compressed them, and with chunked framing removed (the reconstructed headers say so). Binary data (images and so on)
+  is stored as-is, which is why these are files and not fields in the JSONL log.
+- **Tunnels.** A blind HTTPS tunnel (Phase 2) has no readable content, so it produces only the `CONNECT` line and
+  response in `_c.txt` / `_s.txt` plus a metadata file. Intercepted HTTPS (Phase 3) is stored decrypted.
+- **Off by default.** Enabled with an option (for example `--capture <dir>`), because it writes everything to disk.
+- **Not redacted.** Raw capture contains credentials, cookies and personal data, exactly like a Fiddler session.
+  The capture folder, the JSONL log and any `.saz` must be treated as sensitive: never commit them (add the folder to
+  `.gitignore`) and delete them when done.
+- **Numbering.** Exchange numbers are assigned in the order requests arrive, so the number is stable even when
+  responses finish out of order. Writes happen on a background queue so capture does not slow down forwarding.
+- **Metadata.** `_m.xml` should carry at least the fields in the log record (timestamps, client endpoint,
+  protocol versions, status, byte counts, mode, error), written in Fiddler's schema where practical.
 
 ## Testing approach
 
@@ -99,6 +147,20 @@ Status, RequestHeaders, ResponseHeaders, RequestBytes, ResponseBytes, DurationMs
 - Tests: an in-process fake origin server plus proxy tests for GET, POST, chunked, large bodies, redirects.
 
 **Done when:** Chrome browses `http://` sites reliably through the proxy and every exchange is logged.
+
+### Phase 1b: Capture folder (Fiddler-style session files)
+
+- Add a capture sink, enabled by `--capture <dir>`. Each run creates a new sub-folder under `<dir>`.
+- For every exchange, write `N_c.txt`, `N_s.txt` and `N_m.xml`, with `N` starting at 1 for each run and
+  incrementing per request in arrival order.
+- Stream request and response bodies to disk while forwarding (no full buffering), with an optional size cap.
+- Settle the design points listed in decision 5 (reconstructed versus raw bytes, body handling).
+- Tests: a request/response through the fake origin produces the three files with the expected request line,
+  headers, body bytes and metadata; numbering restarts at 1 in a new run folder; binary bodies are byte-identical;
+  capture failures never break forwarding.
+
+**Done when:** browsing through the proxy with `--capture` produces a run folder whose files match what was sent
+and received.
 
 ### Phase 2: HTTPS blind tunnel
 
@@ -135,17 +197,51 @@ Status, RequestHeaders, ResponseHeaders, RequestBytes, ResponseBytes, DurationMs
 - WebSocket upgrades (HTTP/1.1 `Upgrade`, and HTTP/2 extended `CONNECT`) pass through and log the handshake.
 - Optional proxy authentication, and access control by client IP.
 - Request and connection limits, graceful shutdown, log rotation.
+- **`.saz` export:** package a capture run folder (Phase 1b) into a Fiddler-compatible `.saz` file, and verify it
+  opens in Fiddler. Include a command to convert an existing run folder.
 - Optional inspection UI or log viewer; HAR export.
 - Packaging as a Windows service or a single-file executable.
 
+### Phase 6: Byte-exact capture (replace or bypass Kestrel)
+
+Goal: `N_c.txt` and `N_s.txt` contain exactly the bytes that crossed the wire, so the `.saz` matches what Fiddler
+would record. Everything up to Phase 5 runs on Kestrel; this phase removes that limitation. Three options,
+to be chosen by a spike at the start of the phase:
+
+| Option | How | Pros | Cons |
+|---|---|---|---|
+| **A. Wire tap under Kestrel** | Keep Kestrel for parsing and forwarding, but copy the raw bytes before they are parsed. On the client side use a Kestrel connection middleware (`ListenOptions.Use(...)`), which sees the raw duplex stream; placed after the TLS middleware it sees decrypted bytes. On the origin side use `SocketsHttpHandler.PlaintextStreamFilter` (or `ConnectCallback`), which exposes the plaintext stream to the origin. | Smallest change; keeps Kestrel's HTTP/2, limits and security fixes. | Raw bytes arrive per connection, not per request, so they must be split into exchanges (keep-alive, pipelining, HTTP/2 multiplexing). The proxy still re-serializes headers, so the client-side and origin-side captures differ; that matches Fiddler (`_c` is what the client sent, `_s` is what the origin sent). |
+| **B. Own HTTP/1.1 front end** | Replace Kestrel with our own listener and parser that keeps the original bytes of each message. | Full control; byte-exact by construction; no framework behavior to work around. | We must write and maintain parsing, chunked, keep-alive and error handling, and security hardening. HTTP/2 would still need separate work (Phase 4's `SslStream` + framing code, or a library). |
+| **C. Fork Kestrel** | Fork the Kestrel sources from dotnet/aspnetcore and add capture hooks inside the parser. | Full HTTP/1.1 and HTTP/2 behavior with byte-level access. | Kestrel is a very large codebase with deep internal dependencies; the fork has to be kept in sync with upstream security fixes, and may not build outside the aspnetcore repo. Likely the highest long-term cost. |
+
+Initial leaning: try **A** first, because it is the cheapest and its viability can be tested in a day. Fall back to
+**B** for HTTP/1.1 if the tap cannot deliver clean per-exchange bytes. **C** is the last resort.
+
+Notes for the spike:
+
+- Check how connection middleware and `PlaintextStreamFilter` behave with HTTP/2. Raw HTTP/2 is binary frames
+  (HPACK-compressed headers), so a byte-exact HTTP/2 capture is not readable text. Decide whether `_c.txt` /
+  `_s.txt` hold the raw frames for HTTP/2 or the HTTP/1.1-style rendering that Fiddler writes, and whether to store
+  both.
+- Make sure capture stays off the hot path (bounded queue, drop or back-pressure policy defined).
+- Confirm the final files open correctly in Fiddler.
+
+**Done when:** for HTTP/1.1 traffic (plain and intercepted HTTPS), the bytes in `N_c.txt` and `N_s.txt` are identical
+to a packet-level capture of the same exchange, verified by tests against the fake origin and by comparison with
+Fiddler output for a sample session.
+
 ## Risks and notes
 
+- **Kestrel does not give byte-exact capture.** Until Phase 6, the capture files are reconstructions and may differ
+  from the wire (header spacing and casing, folded headers, chunk framing, malformed requests that Kestrel rejects
+  before our code runs). Anything that needs to see malformed or unusual traffic exactly will need Phase 6.
 - **Certificate pinning** (many mobile apps, some desktop apps) fails under interception. This is expected;
   fall back to tunnel mode for those hosts.
 - **Security of the CA key:** anyone with the root CA private key can impersonate any site to a client that trusts it.
   Keep it local, never commit it (add to `.gitignore`), and make the install step explicit and removable.
 - **Binding:** loopback only, by design, with no option to listen on other interfaces. An open proxy on `0.0.0.0` can be abused.
-- **Privacy and legality:** log only traffic you own or have permission to inspect. Redact credentials by default.
+- **Privacy and legality:** log only traffic you own or have permission to inspect. Nothing is redacted: the JSONL log,
+  raw session capture and `.saz` files all contain credentials and cookies, so keep them out of version control.
 - **Chrome quirks:** HSTS and HTTPS-upgrade mean most real-world sites need Phase 2 or 3 before they are usable.
   `http://httpforever.com/` and `http://neverssl.com/` work for Phase 1 testing.
 - **Version drift:** the project targets `net10.0`. Check current `SocketsHttpHandler` and Kestrel HTTP/2 options
@@ -153,8 +249,11 @@ Status, RequestHeaders, ResponseHeaders, RequestBytes, ResponseBytes, DurationMs
 
 ## Suggested order of work
 
-1. Phase 1 (with tests), commit.
-2. Phase 2, commit.
-3. Phase 3 spike on the Kestrel / `SslStream` question, then the implementation.
-4. Phase 4.
-5. Phase 5 items as needed.
+1. Phase 1 (with tests), commit. *(done)*
+2. Phase 1b: capture folder, commit.
+3. Phase 2, commit.
+4. Phase 3 spike on the Kestrel / `SslStream` question, then the implementation. Keep the Phase 6 goal in mind
+   (byte-exact capture) when choosing how the decrypted stream is handed to the HTTP layer.
+5. Phase 4.
+6. Phase 5 items as needed, including the `.saz` writer.
+7. Phase 6: byte-exact capture. Starts with the A / B / C spike.

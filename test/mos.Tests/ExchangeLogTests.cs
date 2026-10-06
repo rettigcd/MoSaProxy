@@ -46,7 +46,7 @@ public class ExchangeLogTests {
 	}
 
 	[Fact]
-	public async Task Get_RequestCarriesCredentials_LogRedactsThemButOriginStillReceivesThem() {
+	public async Task Get_RequestCarriesCredentials_LogKeepsThemAndOriginReceivesThem() {
 
 		// Given: an origin that records headers and a running proxy
 		await using var origin = await TestOrigin.StartAsync(c => { c.Response.Headers["Set-Cookie"] = "session=secret"; return Task.CompletedTask; });
@@ -58,11 +58,11 @@ public class ExchangeLogTests {
 		request.Headers.TryAddWithoutValidation("Cookie", "a=b");
 		await proxy.Client.SendAsync(request);
 
-		// Then: the log shows [redacted] for Authorization, Cookie and Set-Cookie, while the origin got the real values
+		// Then: the log shows the real Authorization, Cookie and Set-Cookie values (nothing is redacted), and the origin got them too
 		var record = proxy.Log.Records.Single();
-		record.RequestHeaders["Authorization"].ShouldBe("[redacted]");
-		record.RequestHeaders["Cookie"].ShouldBe("[redacted]");
-		record.ResponseHeaders["Set-Cookie"].ShouldBe("[redacted]");
+		record.RequestHeaders["Authorization"].ShouldBe("Bearer topsecret");
+		record.RequestHeaders["Cookie"].ShouldBe("a=b");
+		record.ResponseHeaders["Set-Cookie"].ShouldBe("session=secret");
 		origin.Seen.Single().Headers.Authorization.ToString().ShouldBe("Bearer topsecret");
 	}
 
