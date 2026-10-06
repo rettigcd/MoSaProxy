@@ -27,15 +27,25 @@ public interface IExchangeLog {
 	void Write(ExchangeRecord record);
 }
 
-public sealed class ConsoleExchangeLog(TextWriter? output = null) : IExchangeLog {
-	readonly TextWriter _output = output ?? Console.Out;
+/// <summary>One line per exchange on the console, with the status coloured (green 2xx, cyan 3xx, yellow 4xx, red 5xx or no response).</summary>
+public sealed class ConsoleExchangeLog(ColorConsole? console = null) : IExchangeLog {
+	readonly ColorConsole _console = console ?? ColorConsole.Default;
 
 	public void Write(ExchangeRecord r) {
 		string status = r.Status?.ToString() ?? "---";
-		string error = r.Error is null ? "" : $" [{r.Error}]";
-		lock (_output)
-			_output.WriteLine($"{r.Method} {r.Url} -> {status} ({r.DurationMs:0} ms, {r.ResponseBytes} bytes){error}");
+		var statusColor = StatusColor(r.Status);
+		if (r.Error is null)
+			_console.WriteLine($"{r.Method} {r.Url} -> {statusColor}{status}{Fg.Restore} ({r.DurationMs:0} ms, {r.ResponseBytes} bytes)");
+		else
+			_console.WriteLine($"{r.Method} {r.Url} -> {statusColor}{status}{Fg.Restore} ({r.DurationMs:0} ms, {r.ResponseBytes} bytes) {Fg.Red}[{r.Error}]{Fg.Restore}");
 	}
+
+	static ForegroundColor StatusColor(int? status) => status switch {
+		>= 200 and < 300 => Fg.Green,
+		>= 300 and < 400 => Fg.Cyan,
+		>= 400 and < 500 => Fg.Yellow,
+		_ => Fg.Red,
+	};
 }
 
 public sealed class JsonLinesExchangeLog : IExchangeLog {

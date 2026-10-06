@@ -91,7 +91,7 @@ public class ExchangeLogTests {
 
 		// Given: a console log writing to an in-memory writer and a record for GET http://a.test/x answered with 200
 		var writer = new StringWriter();
-		var log = new ConsoleExchangeLog(writer);
+		var log = new ConsoleExchangeLog(new ColorConsole(writer));
 		var record = new ExchangeRecord { Method = "GET", Url = "http://a.test/x", Status = 200, DurationMs = 12, ResponseBytes = 34 };
 
 		// When: the record is written

@@ -8,7 +8,7 @@ public class InterceptionSetupTests {
 
 	static (bool Trusted, string Output) Run(CertificateAuthority authority, FakeRootStore store, string typedInput, bool interactive = true) {
 		var output = new StringWriter();
-		bool trusted = InterceptionSetup.Run(authority, 8080, Chrome, new RootTrust(store), new StringReader(typedInput), output, interactive);
+		bool trusted = InterceptionSetup.Run(authority, 8080, Chrome, new RootTrust(store), new StringReader(typedInput), new ColorConsole(output), interactive);
 		return (trusted, output.ToString());
 	}
 

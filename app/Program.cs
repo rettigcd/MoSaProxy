@@ -33,7 +33,7 @@ Console.WriteLine($"HTTP proxy listening on 127.0.0.1:{proxy.Port}. Press Ctrl+C
 if (proxy.CaptureRunDirectory is not null) Console.WriteLine($"Capturing sessions to {proxy.CaptureRunDirectory}");
 if (proxy.Authority is { } authority) {
 	bool interactive = OperatingSystem.IsWindows() && !Console.IsInputRedirected;
-	InterceptionSetup.Run(authority, proxy.Port, ChromeLauncher.FindChrome(), new RootTrust(new WindowsUserRootStore()), Console.In, Console.Out, interactive);
+	InterceptionSetup.Run(authority, proxy.Port, ChromeLauncher.FindChrome(), new RootTrust(new WindowsUserRootStore()), Console.In, ColorConsole.Default, interactive);
 }
 await proxy.WaitForShutdownAsync();
 return 0;
