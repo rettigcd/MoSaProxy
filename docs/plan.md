@@ -184,7 +184,28 @@ require parsing the ClientHello); that is left for Phase 3, where TLS is termina
 
 **Done when:** HTTPS sites load through the proxy and appear in the log as tunnels.
 
-### Phase 3: TLS interception with HTTP/1.1
+### Phase 3: TLS interception with HTTP/1.1 *(done)*
+
+Implemented in `CertificateAuthority` (root and per-host certificates) and `TunnelHandler` (interception path).
+Enabled with `--intercept`; `--intercept-bypass a.com,*.b.com` keeps hosts as blind tunnels; `--ca-dir` chooses where
+the root is stored (default `%LOCALAPPDATA%\mos\ca`, outside the repository).
+
+- The Kestrel-vs-`SslStream` question is settled: after `CONNECT` the connection middleware answers 200, does the TLS
+  handshake itself with `SslStream` (ALPN offers only `http/1.1` for now), replaces the connection's transport with the
+  decrypted stream, and calls `next`, so Kestrel parses the decrypted HTTP/1.1 and `ProxyHandler` forwards it. The
+  CONNECT target host and port are carried in the connection's `Items`, and the upstream request goes to
+  `https://<connect host>:<port><path>`. The same hook makes HTTP/2 (Phase 4) a matter of offering `h2` in ALPN.
+- The CONNECT itself is logged and captured as its own exchange as soon as the 200 is sent; each decrypted request is
+  a separate exchange (so capture numbering is CONNECT = 1, first request = 2, and so on).
+- The origin's certificate is validated normally; an untrusted origin certificate gives the client a 502.
+- A client that does not trust the root is detected as a read failure on the decrypted stream right after the
+  handshake (TLS 1.3 lets the server finish its side first) and logged as a TLS failure with a hint.
+- For a test Chrome, startup prints the `--ignore-certificate-errors-spki-list` flag that trusts the root without
+  installing it, plus the `certutil` command for installing it for the current Windows user.
+- Not done yet: automatic fallback to a blind tunnel for hosts whose handshake fails (certificate pinning).
+  Use `--intercept-bypass` for those hosts for now.
+
+Original scope for reference:
 
 - Generate and persist a root CA (key stored with restrictive file permissions). Export the cert for
   install into a test browser profile.

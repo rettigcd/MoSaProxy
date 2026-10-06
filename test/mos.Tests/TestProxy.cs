@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
 
 namespace mos.Tests;
 
@@ -40,26 +42,48 @@ public sealed class TempFolder : IDisposable {
 public sealed class TestProxy : IAsyncDisposable {
 	readonly ProxyHost _host;
 
-	TestProxy(ProxyHost host, MemoryExchangeLog log) {
+	TestProxy(ProxyHost host, MemoryExchangeLog log, bool clientTrustsProxyCa) {
 		_host = host;
 		Log = log;
-		Client = new HttpClient(new HttpClientHandler {
+		var handler = new HttpClientHandler {
 			Proxy = new WebProxy($"http://127.0.0.1:{host.Port}"),
 			UseProxy = true,
 			AllowAutoRedirect = false,
 			UseCookies = false,
-		}) { Timeout = TimeSpan.FromSeconds(30) };
+		};
+		// Like a browser with the mos root installed: accept a certificate only if it names the right host and chains to the mos root.
+		// Without that trust, certificate errors are left alone so the client behaves like a browser that has not installed it.
+		handler.ServerCertificateCustomValidationCallback = (_, certificate, _, errors) => {
+			ServerCertificateSeenByClient = certificate is null ? null : new X509Certificate2(certificate);
+			if (certificate is not null && AlsoTrust.Contains(certificate.Thumbprint)) return true;
+			if (!clientTrustsProxyCa || host.Authority is null) return errors == SslPolicyErrors.None;
+			if ((errors & SslPolicyErrors.RemoteCertificateNameMismatch) != 0 || certificate is null) return false;
+			using var chain = new X509Chain();
+			chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+			chain.ChainPolicy.CustomTrustStore.Add(host.Authority.Root);
+			chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+			return chain.Build(certificate);
+		};
+		Client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
 	}
+
+	/// <summary>The certificate the client was shown by the last HTTPS server it connected to (through the proxy).</summary>
+	public X509Certificate2? ServerCertificateSeenByClient { get; private set; }
+
+	/// <summary>Thumbprints of extra certificates this client accepts (for example a test origin's own self-signed certificate).</summary>
+	public HashSet<string> AlsoTrust { get; } = new();
+
+	public CertificateAuthority? Authority => _host.Authority;
 
 	public MemoryExchangeLog Log { get; }
 	public HttpClient Client { get; }
 	public int Port => _host.Port;
 	public string? CaptureRunDirectory => _host.CaptureRunDirectory;
 
-	public static async Task<TestProxy> StartAsync(ProxyOptions? options = null, ISessionCapture? capture = null) {
+	public static async Task<TestProxy> StartAsync(ProxyOptions? options = null, ISessionCapture? capture = null, bool clientTrustsProxyCa = true) {
 		var log = new MemoryExchangeLog();
 		var host = await ProxyHost.StartAsync(options ?? new ProxyOptions { Port = 0 }, log, capture);
-		return new TestProxy(host, log);
+		return new TestProxy(host, log, clientTrustsProxyCa);
 	}
 
 	public async ValueTask DisposeAsync() {

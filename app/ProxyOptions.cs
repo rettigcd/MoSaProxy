@@ -25,12 +25,33 @@ public sealed class ProxyOptions {
 	/// <summary>Optional cap on how many bytes of each request/response body are written to capture files.</summary>
 	public long? CaptureMaxBodyBytes { get; init; }
 
+	/// <summary>
+	/// Decrypt HTTPS: answer CONNECT, present a generated certificate to the client, and forward the decrypted requests.
+	/// Off by default (CONNECT is then a blind tunnel). Clients must trust the root certificate in <see cref="CaDirectory"/>.
+	/// </summary>
+	public bool Intercept { get; init; }
+
+	/// <summary>Hosts that are never intercepted (they stay blind tunnels). Exact names, or "*.example.com" for subdomains.</summary>
+	public IReadOnlyList<string> InterceptBypass { get; init; } = Array.Empty<string>();
+
+	/// <summary>Folder holding the root certificate used for interception.</summary>
+	public string CaDirectory { get; init; } = DefaultCaDirectory;
+
+	public static string DefaultCaDirectory =>
+		Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "mos", "ca");
+
+	/// <summary>Replaces the normal check of an origin server's certificate. Meant for tests; null means normal validation.</summary>
+	public System.Net.Security.RemoteCertificateValidationCallback? OriginCertificateValidation { get; init; }
+
 	public static ProxyOptions Parse(string[] args) {
 		int port = 8080;
 		string? logPath = null;
 		string? captureDirectory = null;
 		long? captureMaxBody = null;
 		var connectTimeout = DefaultConnectTimeout;
+		bool intercept = false;
+		var bypass = new List<string>();
+		string caDirectory = DefaultCaDirectory;
 		for (int i = 0; i < args.Length; i++) {
 			switch (args[i]) {
 				case "--port":
@@ -57,10 +78,25 @@ public sealed class ProxyOptions {
 						throw new ArgumentException("--connect-timeout requires a number of seconds greater than 0 (up to 3600).");
 					connectTimeout = TimeSpan.FromSeconds(seconds);
 					break;
+				case "--intercept":
+					intercept = true;
+					break;
+				case "--intercept-bypass":
+					if (i + 1 >= args.Length) throw new ArgumentException("--intercept-bypass requires a comma-separated list of hosts.");
+					bypass.AddRange(args[++i].Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
+					break;
+				case "--ca-dir":
+					if (i + 1 >= args.Length) throw new ArgumentException("--ca-dir requires a folder path.");
+					caDirectory = args[++i];
+					break;
 				default:
-					throw new ArgumentException($"Unknown argument '{args[i]}'. Usage: mos [--port N] [--log FILE] [--capture DIR] [--capture-max-body BYTES] [--connect-timeout SECONDS]");
+					throw new ArgumentException($"Unknown argument '{args[i]}'. Usage: mos [--port N] [--log FILE] [--capture DIR] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] [--intercept-bypass HOSTS] [--ca-dir DIR]");
 			}
 		}
-		return new ProxyOptions { Port = port, LogPath = logPath, CaptureDirectory = captureDirectory, CaptureMaxBodyBytes = captureMaxBody, ConnectTimeout = connectTimeout };
+		if (bypass.Count > 0 && !intercept) throw new ArgumentException("--intercept-bypass only makes sense together with --intercept.");
+		return new ProxyOptions {
+			Port = port, LogPath = logPath, CaptureDirectory = captureDirectory, CaptureMaxBodyBytes = captureMaxBody,
+			ConnectTimeout = connectTimeout, Intercept = intercept, InterceptBypass = bypass, CaDirectory = caDirectory,
+		};
 	}
 }

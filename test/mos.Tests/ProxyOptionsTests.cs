@@ -89,6 +89,52 @@ public class ProxyOptionsTests {
 		options.ConnectTimeout.ShouldBe(TimeSpan.FromSeconds(expectedSeconds));
 	}
 
+	[Fact]
+	public void Parse_NoInterceptArguments_LeavesInterceptionOff() {
+
+		// Given: no command-line arguments
+		var args = Array.Empty<string>();
+
+		// When: the options are parsed
+		var options = ProxyOptions.Parse(args);
+
+		// Then: HTTPS interception is off, nothing is bypassed, and the CA folder is the default one in the user's profile
+		options.Intercept.ShouldBeFalse();
+		options.InterceptBypass.ShouldBeEmpty();
+		options.CaDirectory.ShouldBe(ProxyOptions.DefaultCaDirectory);
+	}
+
+	[Fact]
+	public void Parse_InterceptArguments_AreApplied() {
+
+		// Given: arguments that turn interception on, bypass two hosts (one a wildcard), and choose a CA folder
+		var args = new[] { "--intercept", "--intercept-bypass", "bank.example, *.secure.example", "--ca-dir", "my-ca" };
+
+		// When: the options are parsed
+		var options = ProxyOptions.Parse(args);
+
+		// Then: interception is on, the bypass list holds both hosts (trimmed), and the CA folder is the chosen one
+		options.Intercept.ShouldBeTrue();
+		options.InterceptBypass.ShouldBe(new[] { "bank.example", "*.secure.example" });
+		options.CaDirectory.ShouldBe("my-ca");
+	}
+
+	[Theory]
+	[InlineData("--intercept-bypass", "bank.example")]
+	[InlineData("--intercept", "--intercept-bypass")]
+	[InlineData("--intercept", "--ca-dir")]
+	public void Parse_InvalidInterceptArguments_Throws(params string[] args) {
+
+		// Given: a bypass list without --intercept, or an option missing its value
+		// (supplied by the test data)
+
+		// When: the options are parsed
+		var parse = () => ProxyOptions.Parse(args);
+
+		// Then: parsing fails with an ArgumentException
+		Should.Throw<ArgumentException>(parse);
+	}
+
 	[Theory]
 	[InlineData("--connect-timeout")]
 	[InlineData("--connect-timeout", "0")]

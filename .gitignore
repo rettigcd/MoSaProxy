@@ -485,3 +485,6 @@ $RECYCLE.BIN/
 captures/
 *.jsonl
 *.saz
+*.pfx
+*.pem
+ca/

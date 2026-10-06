@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using Microsoft.AspNetCore.Connections.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.WebUtilities;
@@ -17,12 +18,15 @@ public sealed class ProxyHandler : IDisposable {
 		_log = log;
 		_capture = capture;
 		_options = options;
-		_client = new HttpClient(new SocketsHttpHandler {
+		var handler = new SocketsHttpHandler {
 			UseProxy = false,
 			AllowAutoRedirect = false,
 			UseCookies = false,
 			AutomaticDecompression = System.Net.DecompressionMethods.None,
-		}) { Timeout = Timeout.InfiniteTimeSpan };
+		};
+		if (options.OriginCertificateValidation is { } validation)
+			handler.SslOptions.RemoteCertificateValidationCallback = validation;
+		_client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
 	}
 
 	public void Dispose() => _client.Dispose();
@@ -39,10 +43,18 @@ public sealed class ProxyHandler : IDisposable {
 			capture = NullExchangeCapture.Instance;
 		}
 
-		Uri.TryCreate(rawTarget, UriKind.Absolute, out var uri);
+		// Inside an intercepted (decrypted) tunnel the target is just a path; the host comes from the CONNECT request.
+		Uri? interceptBase = null;
+		if (context.Features.Get<IConnectionItemsFeature>()?.Items.TryGetValue(TunnelHandler.InterceptTargetKey, out var interceptItem) == true)
+			interceptBase = interceptItem as Uri;
+		Uri? uri;
+		if (interceptBase is not null)
+			uri = rawTarget.StartsWith('/') && Uri.TryCreate(interceptBase, rawTarget, out var combined) ? combined : null;
+		else
+			Uri.TryCreate(rawTarget, UriKind.Absolute, out uri);
 		var counted = new CountingStream(request.Body);
 		long responseBytes = 0;
-		string mode = "plain";
+		string mode = interceptBase is null ? "plain" : "intercept";
 		string? error = null;
 		string? originVersion = null;
 
@@ -57,10 +69,10 @@ public sealed class ProxyHandler : IDisposable {
 				error = "CONNECT reached the HTTP handler";
 				await RespondAsync(context, capture, 405, "CONNECT is handled at the connection level.");
 			}
-			else if (uri is null || uri.Scheme != Uri.UriSchemeHttp) {
+			else if (uri is null || (interceptBase is null && uri.Scheme != Uri.UriSchemeHttp)) {
 				mode = "rejected";
-				error = "target is not an absolute http:// URL";
-				await RespondAsync(context, capture, 400, "Expected an absolute http:// URL.");
+				error = interceptBase is null ? "target is not an absolute http:// URL" : "request target is not a path";
+				await RespondAsync(context, capture, 400, interceptBase is null ? "Expected an absolute http:// URL." : "Expected a request path.");
 			}
 			else {
 				responseBytes = await ForwardAsync(context, capture, uri, counted, v => originVersion = v);

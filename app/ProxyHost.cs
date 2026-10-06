@@ -13,12 +13,13 @@ public sealed class ProxyHost : IAsyncDisposable {
 	readonly ProxyHandler _handler;
 	readonly CancellationTokenSource _shutdown;
 
-	ProxyHost(WebApplication app, ProxyHandler handler, CancellationTokenSource shutdown, int port, string? captureRunDirectory) {
+	ProxyHost(WebApplication app, ProxyHandler handler, CancellationTokenSource shutdown, int port, string? captureRunDirectory, CertificateAuthority? authority) {
 		_app = app;
 		_shutdown = shutdown;
 		_handler = handler;
 		Port = port;
 		CaptureRunDirectory = captureRunDirectory;
+		Authority = authority;
 	}
 
 	/// <summary>The port actually bound (useful when the options asked for port 0).</summary>
@@ -26,6 +27,9 @@ public sealed class ProxyHost : IAsyncDisposable {
 
 	/// <summary>The folder this run's capture files go into, or null when capture is off or supplied by the caller.</summary>
 	public string? CaptureRunDirectory { get; }
+
+	/// <summary>The certificate authority used for HTTPS interception, or null when interception is off.</summary>
+	public CertificateAuthority? Authority { get; }
 
 	public static async Task<ProxyHost> StartAsync(ProxyOptions options, IExchangeLog log, ISessionCapture? capture = null) {
 		string? runDirectory = null;
@@ -38,8 +42,9 @@ public sealed class ProxyHost : IAsyncDisposable {
 			}
 		}
 
+		var authority = options.Intercept ? CertificateAuthority.LoadOrCreate(options.CaDirectory) : null;
 		var shutdown = new CancellationTokenSource();
-		var tunnels = new TunnelHandler(log, capture, options, shutdown.Token);
+		var tunnels = new TunnelHandler(log, capture, options, shutdown.Token, authority);
 		var builder = WebApplication.CreateSlimBuilder();
 		builder.Logging.ClearProviders();
 		builder.WebHost.ConfigureKestrel(kestrel => {
@@ -55,7 +60,7 @@ public sealed class ProxyHost : IAsyncDisposable {
 		await app.StartAsync();
 
 		var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
-		return new ProxyHost(app, handler, shutdown, new Uri(address).Port, runDirectory);
+		return new ProxyHost(app, handler, shutdown, new Uri(address).Port, runDirectory, authority);
 	}
 
 	public Task WaitForShutdownAsync() => _app.WaitForShutdownAsync();
