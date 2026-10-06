@@ -16,6 +16,12 @@ public sealed class ProxyOptions {
 
 	public static readonly TimeSpan DefaultConnectTimeout = TimeSpan.FromSeconds(15);
 
+	/// <summary>
+	/// With interception on, how long to wait for the first bytes of a CONNECT tunnel to tell TLS, plain HTTP and other protocols apart.
+	/// A client that says nothing for this long (some protocols have the server speak first) is relayed blindly.
+	/// </summary>
+	public TimeSpan SniffTimeout { get; init; } = TimeSpan.FromSeconds(3);
+
 	/// <summary>A tunnel with no data moving in either direction for this long is closed.</summary>
 	public TimeSpan TunnelIdleTimeout { get; init; } = TimeSpan.FromMinutes(5);
 

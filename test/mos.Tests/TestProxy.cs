@@ -42,8 +42,11 @@ public sealed class TempFolder : IDisposable {
 public sealed class TestProxy : IAsyncDisposable {
 	readonly ProxyHost _host;
 
+	readonly bool _clientTrustsProxyCa;
+
 	TestProxy(ProxyHost host, MemoryExchangeLog log, bool clientTrustsProxyCa) {
 		_host = host;
+		_clientTrustsProxyCa = clientTrustsProxyCa;
 		Log = log;
 		HttpClient Build(Version requestVersion) {
 			var handler = new HttpClientHandler {
@@ -54,17 +57,7 @@ public sealed class TestProxy : IAsyncDisposable {
 			};
 			// Like a browser with the mos root installed: accept a certificate only if it names the right host and chains to the mos root.
 			// Without that trust, certificate errors are left alone so the client behaves like a browser that has not installed it.
-			handler.ServerCertificateCustomValidationCallback = (_, certificate, _, errors) => {
-				ServerCertificateSeenByClient = certificate is null ? null : new X509Certificate2(certificate);
-				if (certificate is not null && AlsoTrust.Contains(certificate.Thumbprint)) return true;
-				if (!clientTrustsProxyCa || host.Authority is null) return errors == SslPolicyErrors.None;
-				if ((errors & SslPolicyErrors.RemoteCertificateNameMismatch) != 0 || certificate is null) return false;
-				using var chain = new X509Chain();
-				chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-				chain.ChainPolicy.CustomTrustStore.Add(host.Authority.Root);
-				chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-				return chain.Build(certificate);
-			};
+			handler.ServerCertificateCustomValidationCallback = (_, certificate, _, errors) => ValidateServerCertificate(certificate, errors);
 			return new HttpClient(handler) {
 				Timeout = TimeSpan.FromSeconds(30),
 				DefaultRequestVersion = requestVersion,
@@ -73,6 +66,33 @@ public sealed class TestProxy : IAsyncDisposable {
 		}
 		Client = Build(HttpVersion.Version11);
 		Http2Client = Build(HttpVersion.Version20);
+	}
+
+	/// <summary>
+	/// Like a browser with the mos root installed: accept a certificate only if it names the right host and chains to the mos root.
+	/// Without that trust, certificate errors are left alone so the client behaves like a browser that has not installed it.
+	/// </summary>
+	bool ValidateServerCertificate(X509Certificate2? certificate, SslPolicyErrors errors) {
+		if (certificate is not null) ServerCertificateSeenByClient = new X509Certificate2(certificate);
+		if (certificate is not null && AlsoTrust.Contains(certificate.Thumbprint)) return true;
+		if (!_clientTrustsProxyCa || _host.Authority is null) return errors == SslPolicyErrors.None;
+		if ((errors & SslPolicyErrors.RemoteCertificateNameMismatch) != 0 || certificate is null) return false;
+		using var chain = new X509Chain();
+		chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+		chain.ChainPolicy.CustomTrustStore.Add(_host.Authority.Root);
+		chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+		return chain.Build(certificate);
+	}
+
+	/// <summary>A WebSocket client that goes through the proxy and validates certificates like <see cref="Client"/> does. Not connected yet.</summary>
+	public System.Net.WebSockets.ClientWebSocket CreateWebSocket(Action<System.Net.WebSockets.ClientWebSocketOptions>? configure = null) {
+		var socket = new System.Net.WebSockets.ClientWebSocket();
+		socket.Options.Proxy = new WebProxy($"http://127.0.0.1:{Port}");
+		socket.Options.CollectHttpResponseDetails = true;
+		socket.Options.RemoteCertificateValidationCallback = (_, certificate, _, errors) =>
+			ValidateServerCertificate(certificate is null ? null : new X509Certificate2(certificate), errors);
+		configure?.Invoke(socket.Options);
+		return socket;
 	}
 
 	/// <summary>The certificate the client was shown by the last HTTPS server it connected to (through the proxy).</summary>

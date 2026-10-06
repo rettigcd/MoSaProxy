@@ -156,12 +156,103 @@ public sealed class TunnelHandler(
 			? host.EndsWith(pattern[1..], StringComparison.OrdinalIgnoreCase)
 			: host.Equals(pattern, StringComparison.OrdinalIgnoreCase);
 
+	enum Sniffed { Tls, PlainHttp, Other }
+
+	static readonly string[] HttpMethodPrefixes = { "GET ", "POST ", "PUT ", "HEAD ", "DELETE ", "OPTIONS ", "PATCH ", "TRACE ", "CONNECT " };
+
+	/// <summary>
+	/// A CONNECT to an intercepted host is not always TLS (ws:// uses plain HTTP on port 80, and other protocols can be tunneled too).
+	/// Look at the first bytes the client sends: a TLS handshake is decrypted, plain HTTP is handed to Kestrel as it is,
+	/// and anything else (or a client that sends nothing, as with protocols where the server speaks first) is relayed blindly.
+	/// </summary>
+	async Task InterceptAsync(ConnectionContext connection, ConnectionDelegate next, string host, int port) {
+		switch (await SniffAsync(connection.Transport.Input, options.SniffTimeout, connection.ConnectionClosed)) {
+			case Sniffed.Tls:
+				await InterceptTlsAsync(connection, next, host, port);
+				return;
+			case Sniffed.PlainHttp:
+				// Already readable: just tell the HTTP layer where the requests are really going.
+				connection.Items[InterceptTargetKey] = new UriBuilder(Uri.UriSchemeHttp, host, port).Uri;
+				await next(connection);
+				return;
+			default:
+				await RelayUnrecognizedAsync(connection, host, port);
+				return;
+		}
+	}
+
+	/// <summary>Connects to the origin and relays a tunnel whose content is neither TLS nor HTTP.</summary>
+	async Task RelayUnrecognizedAsync(ConnectionContext connection, string host, int port) {
+		long started = Stopwatch.GetTimestamp();
+		string? error = null;
+		long toOrigin = 0, fromOrigin = 0;
+		try {
+			using var origin = await TunnelRelay.ConnectAsync(host, port, options.ConnectTimeout, connection.ConnectionClosed);
+			using var client = new DuplexStream(connection.Transport.Input.AsStream(), connection.Transport.Output.AsStream());
+			(toOrigin, fromOrigin) = await TunnelRelay.RelayAsync(client, origin, options.TunnelIdleTimeout, shutdown);
+		}
+		catch (Exception ex) when (ex is not OutOfMemoryException) {
+			error = $"origin unreachable: {ex.Message}";
+		}
+		log.Write(new ExchangeRecord {
+			Timestamp = DateTimeOffset.UtcNow,
+			Client = (connection.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? "",
+			Host = host,
+			Port = port,
+			Method = "CONNECT",
+			Url = $"{host}:{port}",
+			ClientHttpVersion = "HTTP/1.1",
+			Status = error is null ? 200 : null,
+			RequestBytes = toOrigin,
+			ResponseBytes = fromOrigin,
+			DurationMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+			Mode = error is null ? "tunnel" : "rejected",
+			Error = error,
+		});
+	}
+
+	/// <summary>Looks at the first bytes of a tunnel without consuming them. Waits only briefly: a client that stays silent is treated as "other".</summary>
+	static async Task<Sniffed> SniffAsync(PipeReader input, TimeSpan timeout, CancellationToken connectionClosed) {
+		using var timer = CancellationTokenSource.CreateLinkedTokenSource(connectionClosed);
+		timer.CancelAfter(timeout);
+		try {
+			while (true) {
+				var result = await input.ReadAsync(timer.Token);
+				var buffer = result.Buffer;
+				var kind = Classify(buffer.Slice(0, Math.Min(buffer.Length, 9)).ToArray());
+				if (kind is not null || result.IsCompleted) {
+					input.AdvanceTo(buffer.Start); // consume and examine nothing: the real reader sees the same bytes
+					return kind ?? Sniffed.Other;
+				}
+				input.AdvanceTo(buffer.Start, buffer.End); // too few bytes to tell yet
+			}
+		}
+		catch (OperationCanceledException) when (!connectionClosed.IsCancellationRequested) {
+			return Sniffed.Other; // the client said nothing within the time limit
+		}
+	}
+
+	/// <summary>Null means "not enough bytes to decide yet".</summary>
+	static Sniffed? Classify(byte[] firstBytes) {
+		if (firstBytes.Length == 0) return null;
+		// A TLS handshake record starts with 0x16 (handshake) 0x03 (major version).
+		if (firstBytes[0] == 0x16) {
+			if (firstBytes.Length < 2) return null;
+			return firstBytes[1] == 0x03 ? Sniffed.Tls : Sniffed.Other;
+		}
+		var text = Encoding.ASCII.GetString(firstBytes);
+		if (HttpMethodPrefixes.Any(prefix => text.StartsWith(prefix, StringComparison.Ordinal))) return Sniffed.PlainHttp;
+		// Could still turn into a method name once more bytes arrive.
+		if (HttpMethodPrefixes.Any(prefix => prefix.StartsWith(text, StringComparison.Ordinal))) return null;
+		return Sniffed.Other;
+	}
+
 	/// <summary>
 	/// Does the TLS handshake with the client (presenting a certificate generated for the host), then replaces the
 	/// connection's transport with the decrypted stream and lets Kestrel process it as HTTP/1.1 or HTTP/2, whichever
 	/// the client chose during the handshake (ALPN).
 	/// </summary>
-	async Task InterceptAsync(ConnectionContext connection, ConnectionDelegate next, string host, int port) {
+	async Task InterceptTlsAsync(ConnectionContext connection, ConnectionDelegate next, string host, int port) {
 		var clientSide = new DuplexStream(connection.Transport.Input.AsStream(), connection.Transport.Output.AsStream());
 		await using var tls = new SslStream(clientSide, leaveInnerStreamOpen: false);
 

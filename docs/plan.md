@@ -268,8 +268,20 @@ Original scope for reference:
 
 ### Phase 5: Hardening and extras
 
-- WebSocket upgrades (HTTP/1.1 `Upgrade`, and HTTP/2 extended `CONNECT`) pass through and log the handshake.
-- Optional proxy authentication, and access control by client IP.
+- **WebSockets *(done)*:** HTTP/1.1 upgrades and HTTP/2 extended `CONNECT` (RFC 8441) pass through (`WebSocketProxy`).
+  The proxy opens a `ClientWebSocket` to the origin first (so the origin's subprotocol choice is known), then accepts the
+  client's WebSocket and copies messages in both directions, passing the close code and reason on. The two legs are
+  independent (own ping/pong; compression is not negotiated through). It works for `wss://` (intercepted), `ws://`
+  inside a tunnel, and absolute-form upgrade requests sent straight to the proxy. Logging: a record when the handshake
+  succeeds (`Mode: websocket`, status 101) and a second one when the connection closes (`Mode: websocket-closed`,
+  with `ClientMessages`, `OriginMessages` and byte totals); a refused handshake passes the origin's status on (or 502/504)
+  and is logged as `rejected`. Capture: the upgrade request (`N_c.txt`), the origin's 101 response (`N_s.txt`) and every
+  message, text readable and binary as hex, in `N_w.txt`.
+  Supporting change: with interception on, a CONNECT is no longer assumed to be TLS. The first bytes decide: a TLS
+  handshake is decrypted, plain HTTP (such as `ws://` on port 80) goes to the HTTP layer, and anything else, or a silent
+  client (`SniffTimeout`, default 3 s, for protocols where the server speaks first), is relayed blindly.
+- Optional proxy authentication, and access control by client IP. **Dropped:** the listener only accepts loopback
+  connections, so there is nobody to authenticate or filter.
 - Request and connection limits, graceful shutdown, log rotation.
 - **`.saz` export:** package a capture run folder (Phase 1b) into a Fiddler-compatible `.saz` file, and verify it
   opens in Fiddler. Include a command to convert an existing run folder.

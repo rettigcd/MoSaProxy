@@ -13,8 +13,9 @@ public sealed class ProxyHandler : IDisposable {
 	readonly IExchangeLog _log;
 	readonly ISessionCapture _capture;
 	readonly ProxyOptions _options;
+	readonly WebSocketProxy _webSockets;
 
-	public ProxyHandler(IExchangeLog log, ISessionCapture capture, ProxyOptions options) {
+	public ProxyHandler(IExchangeLog log, ISessionCapture capture, ProxyOptions options, CancellationToken shutdown = default) {
 		_log = log;
 		_capture = capture;
 		_options = options;
@@ -27,6 +28,7 @@ public sealed class ProxyHandler : IDisposable {
 		if (options.OriginCertificateValidation is { } validation)
 			handler.SslOptions.RemoteCertificateValidationCallback = validation;
 		_client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+		_webSockets = new WebSocketProxy(_client, options, shutdown);
 	}
 
 	public void Dispose() => _client.Dispose();
@@ -57,12 +59,49 @@ public sealed class ProxyHandler : IDisposable {
 		string mode = interceptBase is null ? "plain" : "intercept";
 		string? error = null;
 		string? originVersion = null;
+		int? statusOverride = null;
+		long? requestBytesOverride = null;
+		int? clientMessages = null, originMessages = null;
+
+		ExchangeRecord MakeRecord(string recordMode, int? recordStatus, long requestBytes, long recordResponseBytes, string? recordError) => new() {
+			Timestamp = DateTimeOffset.UtcNow,
+			Client = context.Connection.RemoteIpAddress?.ToString() ?? "",
+			Scheme = uri?.Scheme ?? "",
+			Host = uri?.Host ?? "",
+			Port = uri?.Port ?? 0,
+			Method = request.Method,
+			Url = uri?.ToString() ?? rawTarget,
+			ClientHttpVersion = request.Protocol,
+			OriginHttpVersion = originVersion,
+			Status = recordStatus,
+			RequestHeaders = HeaderRules.ForLog(request.Headers),
+			ResponseHeaders = HeaderRules.ForLog(context.Response.Headers),
+			RequestBytes = requestBytes,
+			ResponseBytes = recordResponseBytes,
+			DurationMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+			Mode = recordMode,
+			Error = recordError,
+			ClientMessages = clientMessages,
+			OriginMessages = originMessages,
+		};
 
 		try {
 			capture.WriteRequestHead(request.Method, rawTarget, request.Protocol,
 				request.Headers.Select(h => KeyValuePair.Create(h.Key, h.Value.ToString())));
 
-			if (HttpMethods.IsConnect(request.Method)) {
+			if (context.WebSockets.IsWebSocketRequest && uri is not null && (interceptBase is not null || uri.Scheme == Uri.UriSchemeHttp)) {
+				// A WebSocket connection (an HTTP/1.1 upgrade, or HTTP/2 extended CONNECT) lives for as long as the client keeps it.
+				// The handshake is logged as soon as it succeeds, and a second record with the totals when the connection closes.
+				mode = "websocket";
+				var summary = await _webSockets.RunAsync(context, capture, uri, () => _log.Write(MakeRecord("websocket", 101, 0, 0, null)));
+				mode = summary.Status == 101 ? "websocket-closed" : "rejected";
+				statusOverride = summary.Status == 0 ? null : summary.Status;
+				requestBytesOverride = summary.ClientBytes;
+				responseBytes = summary.OriginBytes;
+				error = summary.Error;
+				if (summary.Status == 101) { clientMessages = summary.ClientMessages; originMessages = summary.OriginMessages; }
+			}
+			else if (HttpMethods.IsConnect(request.Method)) {
 				// CONNECT tunnels are taken over by TunnelHandler before Kestrel parses the request;
 				// one that still arrives here has nowhere to go.
 				mode = "rejected";
@@ -95,25 +134,7 @@ public sealed class ProxyHandler : IDisposable {
 			else await TryRespondAsync(context, capture, 502, "Proxy error.");
 		}
 		finally {
-			var record = new ExchangeRecord {
-				Timestamp = DateTimeOffset.UtcNow,
-				Client = context.Connection.RemoteIpAddress?.ToString() ?? "",
-				Scheme = uri?.Scheme ?? "",
-				Host = uri?.Host ?? "",
-				Port = uri?.Port ?? 0,
-				Method = request.Method,
-				Url = uri?.ToString() ?? rawTarget,
-				ClientHttpVersion = request.Protocol,
-				OriginHttpVersion = originVersion,
-				Status = context.Response.StatusCode,
-				RequestHeaders = HeaderRules.ForLog(request.Headers),
-				ResponseHeaders = HeaderRules.ForLog(context.Response.Headers),
-				RequestBytes = counted.BytesRead,
-				ResponseBytes = responseBytes,
-				DurationMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds,
-				Mode = mode,
-				Error = error,
-			};
+			var record = MakeRecord(mode, statusOverride ?? context.Response.StatusCode, requestBytesOverride ?? counted.BytesRead, responseBytes, error);
 			_log.Write(record);
 			capture.Complete(record);
 		}

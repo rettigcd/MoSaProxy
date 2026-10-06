@@ -21,6 +21,11 @@ public interface IExchangeCapture {
 	/// <summary>Returns a stream that reads from <paramref name="source"/> and copies what it reads into the response file.</summary>
 	Stream TeeResponseBody(Stream source);
 	void WriteResponseBody(ReadOnlySpan<byte> body);
+	/// <summary>
+	/// Records one WebSocket message (or close frame) in the exchange's N_w.txt file. For a message that is longer than
+	/// the capture limit, <paramref name="payload"/> is the part that was kept and <paramref name="totalBytes"/> the full size.
+	/// </summary>
+	void WriteWebSocketMessage(bool fromClient, System.Net.WebSockets.WebSocketMessageType type, ReadOnlySpan<byte> payload, long totalBytes, string? note = null);
 	/// <summary>Closes the files and writes the metadata file.</summary>
 	void Complete(ExchangeRecord record);
 }
@@ -38,6 +43,7 @@ public sealed class NullExchangeCapture : IExchangeCapture {
 	public void WriteResponseHead(string statusLine, IEnumerable<KeyValuePair<string, string>> headers) { }
 	public Stream TeeResponseBody(Stream source) => source;
 	public void WriteResponseBody(ReadOnlySpan<byte> body) { }
+	public void WriteWebSocketMessage(bool fromClient, System.Net.WebSockets.WebSocketMessageType type, ReadOnlySpan<byte> payload, long totalBytes, string? note = null) { }
 	public void Complete(ExchangeRecord record) { }
 }
 
@@ -74,6 +80,9 @@ sealed class FileExchangeCapture : IExchangeCapture {
 	FileStream? _server;
 	TeeReadStream? _requestTee;
 	TeeReadStream? _responseTee;
+	FileStream? _messages;            // WebSocket messages, N_w.txt; opened on the first message
+	bool _messagesOpened;
+	readonly object _messagesLock = new();   // the two directions of a WebSocket write from different threads
 
 	public FileExchangeCapture(string directory, int number, long? maxBodyBytes) {
 		_directory = directory;
@@ -116,10 +125,40 @@ sealed class FileExchangeCapture : IExchangeCapture {
 		catch (Exception ex) { Fail(ref _server, ex); }
 	}
 
+	public void WriteWebSocketMessage(bool fromClient, System.Net.WebSockets.WebSocketMessageType type, ReadOnlySpan<byte> payload, long totalBytes, string? note = null) {
+		lock (_messagesLock) {
+			if (!_messagesOpened) { _messagesOpened = true; _messages = Open($"{Number}_w.txt"); }
+			if (_messages is null) return;
+			try {
+				var text = new StringBuilder();
+				text.Append('[').Append(DateTimeOffset.UtcNow.ToString("O")).Append("] ")
+					.Append(fromClient ? "client -> origin" : "origin -> client").Append(' ')
+					.Append(type.ToString().ToLowerInvariant()).Append(' ').Append(totalBytes).Append(" bytes");
+				if (payload.Length < totalBytes) text.Append(" (first ").Append(payload.Length).Append(" kept)");
+				if (note is not null) text.Append(' ').Append(note);
+				text.Append("\r\n");
+				if (type == System.Net.WebSockets.WebSocketMessageType.Binary) {
+					// 32 bytes per line, offset first, so binary messages stay readable and diffable
+					for (int offset = 0; offset < payload.Length; offset += 32) {
+						var line = payload.Slice(offset, Math.Min(32, payload.Length - offset));
+						text.Append("  ").Append(offset.ToString("x4")).Append(": ").Append(Convert.ToHexString(line).ToLowerInvariant()).Append("\r\n");
+					}
+				}
+				else if (payload.Length > 0) {
+					text.Append(Encoding.UTF8.GetString(payload)).Append("\r\n");
+				}
+				text.Append("\r\n");
+				_messages.Write(Encoding.UTF8.GetBytes(text.ToString()));
+			}
+			catch (Exception ex) { Fail(ref _messages, ex); }
+		}
+	}
+
 	public void Complete(ExchangeRecord record) {
 		try {
 			_client?.Dispose();
 			_server?.Dispose();
+			lock (_messagesLock) _messages?.Dispose();
 			var meta = new XElement("Exchange",
 				new XAttribute("Number", Number),
 				new XElement("Timestamp", record.Timestamp.ToString("O")),
@@ -139,6 +178,8 @@ sealed class FileExchangeCapture : IExchangeCapture {
 				new XElement("DurationMs", Math.Round(record.DurationMs, 1)),
 				new XElement("Mode", record.Mode),
 				new XElement("Error", record.Error ?? ""));
+			if (record.ClientMessages is not null) meta.Add(new XElement("ClientMessages", record.ClientMessages));
+			if (record.OriginMessages is not null) meta.Add(new XElement("OriginMessages", record.OriginMessages));
 			// Write to a temp name and rename, so a reader never sees a half-written metadata file.
 			string final = Path.Combine(_directory, $"{Number}_m.xml");
 			string temp = final + ".tmp";

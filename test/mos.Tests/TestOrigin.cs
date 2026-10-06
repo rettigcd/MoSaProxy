@@ -40,6 +40,7 @@ public sealed class TestOrigin : IAsyncDisposable {
 			if (http1Only) listen.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1;
 		}));
 		var app = builder.Build();
+		app.UseWebSockets();
 		TestOrigin? origin = null;
 		app.Run(async context => {
 			using var buffer = new MemoryStream();

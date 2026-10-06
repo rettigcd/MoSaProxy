@@ -21,6 +21,12 @@ public sealed record ExchangeRecord {
 	public double DurationMs { get; init; }
 	public string Mode { get; init; } = "plain";
 	public string? Error { get; init; }
+
+	/// <summary>WebSocket only: complete messages the client sent to the origin (RequestBytes counts their bytes).</summary>
+	public int? ClientMessages { get; init; }
+
+	/// <summary>WebSocket only: complete messages the origin sent to the client (ResponseBytes counts their bytes).</summary>
+	public int? OriginMessages { get; init; }
 }
 
 public interface IExchangeLog {
@@ -34,10 +40,12 @@ public sealed class ConsoleExchangeLog(ColorConsole? console = null) : IExchange
 	public void Write(ExchangeRecord r) {
 		string status = r.Status?.ToString() ?? "---";
 		var statusColor = StatusColor(r.Status);
+		// A WebSocket's closing record also says how many messages went each way.
+		string messages = r.ClientMessages is { } sent ? $" [closed: client sent {sent} message(s), origin sent {r.OriginMessages}]" : "";
 		if (r.Error is null)
-			_console.WriteLine($"{r.Method} {r.Url} -> {statusColor}{status}{Fg.Restore} ({r.DurationMs:0} ms, {r.ResponseBytes} bytes)");
+			_console.WriteLine($"{r.Method} {r.Url} -> {statusColor}{status}{Fg.Restore} ({r.DurationMs:0} ms, {r.ResponseBytes} bytes){messages}");
 		else
-			_console.WriteLine($"{r.Method} {r.Url} -> {statusColor}{status}{Fg.Restore} ({r.DurationMs:0} ms, {r.ResponseBytes} bytes) {Fg.Red}[{r.Error}]{Fg.Restore}");
+			_console.WriteLine($"{r.Method} {r.Url} -> {statusColor}{status}{Fg.Restore} ({r.DurationMs:0} ms, {r.ResponseBytes} bytes){messages} {Fg.Red}[{r.Error}]{Fg.Restore}");
 	}
 
 	static ForegroundColor StatusColor(int? status) => status switch {
