@@ -168,6 +168,11 @@ public ref struct ConsoleInterpolatedStringHandler
 		_parts.Add(color);
 	}
 
+	// null = "leave the colour as it is", so a message can colour some values and not others without being split in two
+	public void AppendFormatted(ForegroundColor? color) {
+		if (color is { } value) _parts.Add(value);
+	}
+
 	public void AppendFormatted(RestoreForeground restore) {
 		_parts.Add(restore);
 	}

@@ -96,6 +96,55 @@ public class ColorConsoleTests {
 	}
 
 	[Fact]
+	public void WriteLine_NoColour_PrintsJustTheText() {
+
+		// Given: a console that writes to an in-memory writer and a colour that is "none"
+		var writer = new StringWriter();
+		ForegroundColor? none = null;
+		ForegroundColor? blue = Fg.Blue;
+
+		// When: a message uses it, and another message uses a real colour held in the same kind of variable
+		new ColorConsole(writer).WriteLine($"{none}plain{Fg.Restore} and {blue}coloured{Fg.Restore}");
+
+		// Then: neither marker prints anything, so only the text appears
+		writer.ToString().ShouldBe("plain and coloured" + Environment.NewLine);
+	}
+
+	[Theory]
+	[InlineData("GET")]
+	[InlineData("POST")]
+	[InlineData("PUT")]
+	[InlineData("DELETE")]
+	[InlineData("PATCH")]
+	public void MethodColor_CommonRequestMethods_AreBlue(string method) {
+
+		// Given: a common request method (supplied by the test data)
+
+		// When: its console colour is looked up
+		var color = ConsoleExchangeLog.MethodColor(method);
+
+		// Then: it is blue
+		color.ShouldBe(Fg.Blue);
+	}
+
+	[Theory]
+	[InlineData("CONNECT")]
+	[InlineData("HEAD")]
+	[InlineData("OPTIONS")]
+	[InlineData("TRACE")]
+	[InlineData("get")]
+	public void MethodColor_OtherMethods_KeepTheConsolesOwnColour(string method) {
+
+		// Given: a method that is not one of the five (supplied by the test data; HTTP methods are case-sensitive, so "get" is not "GET")
+
+		// When: its console colour is looked up
+		var color = ConsoleExchangeLog.MethodColor(method);
+
+		// Then: there is no colour, meaning the text keeps the console's normal colour
+		color.ShouldBeNull();
+	}
+
+	[Fact]
 	public void ConsoleLog_StatusColours_DoNotChangeThePlainText() {
 
 		// Given: a console log writing to an in-memory writer, and records for a success, a redirect, a client error and a server error with a message
