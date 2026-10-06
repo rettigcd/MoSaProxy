@@ -92,10 +92,10 @@ Status, RequestHeaders, ResponseHeaders, RequestBytes, ResponseBytes, DurationMs
 
 - Replace the hand-rolled parser with Kestrel (or keep the parser only if there is a reason to).
 - Keep-alive support, chunked request and response bodies, streaming (no buffering of whole bodies).
-- Correct hop-by-hop header handling, `Via` / `X-Forwarded-For` policy, `Expect: 100-continue`.
+- Correct hop-by-hop header handling. Policy: no `Via` or `X-Forwarded-For` headers are added. `Expect: 100-continue` is handled.
 - Absolute-URI and origin-form handling, error responses (400/502/504), upstream timeouts.
 - Introduce the log record and a logging abstraction; console + JSONL sinks.
-- Configuration: port, bind address (default `127.0.0.1`, not `Any`), log path. Via `appsettings.json` / CLI.
+- Configuration: port and log path, via CLI (`--port`, `--log`). The listener is always bound to loopback (`127.0.0.1`); there is no option to bind other interfaces.
 - Tests: an in-process fake origin server plus proxy tests for GET, POST, chunked, large bodies, redirects.
 
 **Done when:** Chrome browses `http://` sites reliably through the proxy and every exchange is logged.
@@ -144,7 +144,7 @@ Status, RequestHeaders, ResponseHeaders, RequestBytes, ResponseBytes, DurationMs
   fall back to tunnel mode for those hosts.
 - **Security of the CA key:** anyone with the root CA private key can impersonate any site to a client that trusts it.
   Keep it local, never commit it (add to `.gitignore`), and make the install step explicit and removable.
-- **Binding:** default to loopback only. An open proxy on `0.0.0.0` can be abused.
+- **Binding:** loopback only, by design, with no option to listen on other interfaces. An open proxy on `0.0.0.0` can be abused.
 - **Privacy and legality:** log only traffic you own or have permission to inspect. Redact credentials by default.
 - **Chrome quirks:** HSTS and HTTPS-upgrade mean most real-world sites need Phase 2 or 3 before they are usable.
   `http://httpforever.com/` and `http://neverssl.com/` work for Phase 1 testing.
