@@ -234,7 +234,29 @@ Original scope for reference:
 
 **Done when:** `https://` pages load in a profile that trusts the mos CA, with full URLs and headers logged.
 
-### Phase 4: HTTP/2
+### Phase 4: HTTP/2 *(done)*
+
+Implemented as planned, with these specifics:
+
+- **Client side:** on an intercepted connection the TLS handshake offers `h2` then `http/1.1` (ALPN). Kestrel only picks
+  HTTP/2 for a connection that looks like TLS and reports `h2`, so after the handshake `TunnelHandler` sets
+  `ITlsConnectionFeature` and `ITlsApplicationProtocolFeature` on the connection. `--no-http2` offers only `http/1.1`.
+- **Origin side:** requests to `https://` origins ask for HTTP/2 with `RequestVersionOrLower`, so the origin's ALPN decides and
+  an origin without HTTP/2 transparently gets HTTP/1.1. Plain `http://` origins always get HTTP/1.1. The two sides are
+  independent, so any combination works (h2 client + h1 origin, h1 client + h2 origin).
+- **Bodies:** HTTP/2 has no chunking or required `Content-Length`, so whether a request has a body now comes from
+  Kestrel's `IHttpRequestBodyDetectionFeature` instead of the headers.
+- **Responses:** no reason phrase is set for HTTP/2 clients; trailers (as used by gRPC) are passed on.
+- **Logging and capture:** each request is its own exchange (multiplexed requests are logged separately). The record shows
+  the protocol on each side (`HTTP/2`, `HTTP/1.1`); the capture files use the HTTP/1.1 text layout with the version
+  in the request and status lines (`GET /page HTTP/2`, `HTTP/2 200 OK`), as the plan said Fiddler does.
+- **Verified with:** the test suite (flow control with a 5 MB body, 30 concurrent requests over one connection per side,
+  bodies without `Content-Length`, trailers, both fallbacks) and headless Chrome 154, where 25 of 26 decrypted requests
+  were HTTP/2 on both sides.
+- **Not done:** stream resets and `GOAWAY` are not mapped between the two sides explicitly (each side's own HTTP/2
+  stack handles its own connection), and WebSocket over HTTP/2 (extended CONNECT) is left for Phase 5.
+
+Original scope for reference:
 
 - Offer ALPN `h2` and `http/1.1` to the client; serve HTTP/2 on the intercepted connection.
 - Upstream: prefer `h2` where the origin supports it, fall back to HTTP/1.1.

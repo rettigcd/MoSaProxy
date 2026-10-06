@@ -5,8 +5,11 @@ using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Microsoft.AspNetCore.Connections;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 
 namespace mos;
 
@@ -155,18 +158,23 @@ public sealed class TunnelHandler(
 
 	/// <summary>
 	/// Does the TLS handshake with the client (presenting a certificate generated for the host), then replaces the
-	/// connection's transport with the decrypted stream and lets Kestrel process it as plain HTTP/1.1.
+	/// connection's transport with the decrypted stream and lets Kestrel process it as HTTP/1.1 or HTTP/2, whichever
+	/// the client chose during the handshake (ALPN).
 	/// </summary>
 	async Task InterceptAsync(ConnectionContext connection, ConnectionDelegate next, string host, int port) {
 		var clientSide = new DuplexStream(connection.Transport.Input.AsStream(), connection.Transport.Output.AsStream());
 		await using var tls = new SslStream(clientSide, leaveInnerStreamOpen: false);
+
+		var protocols = new List<SslApplicationProtocol>();
+		if (options.EnableHttp2) protocols.Add(SslApplicationProtocol.Http2);
+		protocols.Add(SslApplicationProtocol.Http11);
 
 		try {
 			using var handshakeTimeout = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
 			handshakeTimeout.CancelAfter(TimeSpan.FromSeconds(15));
 			await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions {
 				ServerCertificateSelectionCallback = (_, serverName) => authority!.GetCertificateFor(ChooseName(serverName, host)),
-				ApplicationProtocols = new List<SslApplicationProtocol> { SslApplicationProtocol.Http11 },
+				ApplicationProtocols = protocols,
 				ClientCertificateRequired = false,
 			}, handshakeTimeout.Token);
 		}
@@ -176,6 +184,10 @@ public sealed class TunnelHandler(
 		}
 
 		connection.Items[InterceptTargetKey] = new UriBuilder(Uri.UriSchemeHttps, host, port).Uri;
+		// Kestrel only picks HTTP/2 for a connection that looks like TLS and reports "h2" as the negotiated protocol,
+		// so tell it what the handshake above agreed on.
+		connection.Features.Set<ITlsConnectionFeature>(new TlsConnectionFeature());
+		connection.Features.Set<ITlsApplicationProtocolFeature>(new TlsApplicationProtocolFeature(tls.NegotiatedApplicationProtocol.Protocol));
 		// With TLS 1.3 the server can finish its side of the handshake before the client has accepted the certificate,
 		// so a client that does not trust the mos root only shows up as an error on the first read. Watch for that.
 		var observed = new ObservedStream(tls);
@@ -330,4 +342,15 @@ sealed class ObservedStream(Stream inner) : Stream {
 	public override void SetLength(long value) => throw new NotSupportedException();
 	protected override void Dispose(bool disposing) { if (disposing) inner.Dispose(); base.Dispose(disposing); }
 	public override async ValueTask DisposeAsync() { await inner.DisposeAsync(); await base.DisposeAsync(); }
+}
+
+/// <summary>Marks a connection as TLS for Kestrel (there is never a client certificate: the proxy does not ask for one).</summary>
+sealed class TlsConnectionFeature : ITlsConnectionFeature {
+	public X509Certificate2? ClientCertificate { get; set; }
+	public Task<X509Certificate2?> GetClientCertificateAsync(CancellationToken cancellationToken) => Task.FromResult(ClientCertificate);
+}
+
+/// <summary>Tells Kestrel which protocol the TLS handshake negotiated ("h2" or "http/1.1").</summary>
+sealed class TlsApplicationProtocolFeature(ReadOnlyMemory<byte> protocol) : ITlsApplicationProtocolFeature {
+	public ReadOnlyMemory<byte> ApplicationProtocol { get; } = protocol;
 }

@@ -123,7 +123,14 @@ public sealed class ProxyHandler : IDisposable {
 		var request = context.Request;
 		using var upstream = new HttpRequestMessage(new HttpMethod(request.Method), uri);
 
-		bool hasBody = request.ContentLength > 0 || request.Headers.ContainsKey("Transfer-Encoding");
+		// Towards an https origin, ask for HTTP/2 and let the TLS handshake (ALPN) fall back to HTTP/1.1 if the origin
+		// does not offer it. Plain http origins always get HTTP/1.1 (no HTTP/2 without TLS).
+		upstream.Version = uri.Scheme == Uri.UriSchemeHttps ? System.Net.HttpVersion.Version20 : System.Net.HttpVersion.Version11;
+		upstream.VersionPolicy = HttpVersionPolicy.RequestVersionOrLower;
+
+		// HTTP/2 has no chunked encoding or required Content-Length, so ask Kestrel whether a body can follow; fall back to the headers.
+		bool hasBody = context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody
+			?? (request.ContentLength > 0 || request.Headers.ContainsKey("Transfer-Encoding"));
 		if (hasBody) upstream.Content = new StreamContent(capture.TeeRequestBody(requestBody));
 
 		var drop = HeaderRules.HeadersToDrop(request.Headers);
@@ -139,14 +146,18 @@ public sealed class ProxyHandler : IDisposable {
 		timeout.CancelAfter(_options.UpstreamTimeout);
 		using var response = await _client.SendAsync(upstream, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
 		timeout.CancelAfter(Timeout.InfiniteTimeSpan);
-		reportOriginVersion($"HTTP/{response.Version}");
+		reportOriginVersion(HttpVersions.Format(response.Version));
 
 		// The origin's response, as the origin sent it (before the proxy drops hop-by-hop headers).
-		capture.WriteResponseHead($"HTTP/{response.Version} {(int)response.StatusCode} {response.ReasonPhrase}",
+		// HTTP/2 has no reason phrase, so the standard one for the status code is written (as a text capture of HTTP/2 conventionally shows it).
+		string reason = string.IsNullOrEmpty(response.ReasonPhrase) ? ReasonPhrases.GetReasonPhrase((int)response.StatusCode) : response.ReasonPhrase;
+		capture.WriteResponseHead($"{HttpVersions.Format(response.Version)} {(int)response.StatusCode} {reason}",
 			response.Headers.Concat(response.Content.Headers).SelectMany(h => h.Value.Select(v => KeyValuePair.Create(h.Key, v))));
 
 		context.Response.StatusCode = (int)response.StatusCode;
-		context.Features.GetRequiredFeature<IHttpResponseFeature>().ReasonPhrase = response.ReasonPhrase;
+		// Only HTTP/1.x responses carry a reason phrase; to an HTTP/2 client it does not exist.
+		if (!HttpProtocol.IsHttp2(request.Protocol))
+			context.Features.GetRequiredFeature<IHttpResponseFeature>().ReasonPhrase = response.ReasonPhrase;
 		foreach (var header in response.Headers.Concat(response.Content.Headers)) {
 			if (HeaderRules.IsHopByHop(header.Key)) continue;
 			context.Response.Headers.Append(header.Key, header.Value.ToArray());
@@ -155,6 +166,11 @@ public sealed class ProxyHandler : IDisposable {
 		var counted = new CountingStream(context.Response.Body);
 		await using var body = capture.TeeResponseBody(await response.Content.ReadAsStreamAsync(timeout.Token));
 		await body.CopyToAsync(counted, context.RequestAborted);
+
+		// Trailers (headers after the body, as used by gRPC) can only be passed on when the client connection supports them.
+		if (response.TrailingHeaders.Any() && context.Response.SupportsTrailers())
+			foreach (var trailer in response.TrailingHeaders)
+				context.Response.AppendTrailer(trailer.Key, trailer.Value.ToArray());
 		return counted.BytesWritten;
 	}
 

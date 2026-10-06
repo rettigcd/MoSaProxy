@@ -105,6 +105,22 @@ public class ProxyOptionsTests {
 	}
 
 	[Fact]
+	public void Parse_NoHttp2Argument_TurnsHttp2OffAndItDefaultsToOn() {
+
+		// Given: no arguments, and separately the --no-http2 argument
+		var none = Array.Empty<string>();
+		var off = new[] { "--no-http2" };
+
+		// When: both are parsed
+		var defaults = ProxyOptions.Parse(none);
+		var withFlag = ProxyOptions.Parse(off);
+
+		// Then: HTTP/2 is offered by default and not offered with the flag
+		defaults.EnableHttp2.ShouldBeTrue();
+		withFlag.EnableHttp2.ShouldBeFalse();
+	}
+
+	[Fact]
 	public void Parse_UntrustCaArgument_IsSetAndDefaultsToOff() {
 
 		// Given: no arguments, and separately the --untrust-ca argument

@@ -45,26 +45,34 @@ public sealed class TestProxy : IAsyncDisposable {
 	TestProxy(ProxyHost host, MemoryExchangeLog log, bool clientTrustsProxyCa) {
 		_host = host;
 		Log = log;
-		var handler = new HttpClientHandler {
-			Proxy = new WebProxy($"http://127.0.0.1:{host.Port}"),
-			UseProxy = true,
-			AllowAutoRedirect = false,
-			UseCookies = false,
-		};
-		// Like a browser with the mos root installed: accept a certificate only if it names the right host and chains to the mos root.
-		// Without that trust, certificate errors are left alone so the client behaves like a browser that has not installed it.
-		handler.ServerCertificateCustomValidationCallback = (_, certificate, _, errors) => {
-			ServerCertificateSeenByClient = certificate is null ? null : new X509Certificate2(certificate);
-			if (certificate is not null && AlsoTrust.Contains(certificate.Thumbprint)) return true;
-			if (!clientTrustsProxyCa || host.Authority is null) return errors == SslPolicyErrors.None;
-			if ((errors & SslPolicyErrors.RemoteCertificateNameMismatch) != 0 || certificate is null) return false;
-			using var chain = new X509Chain();
-			chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-			chain.ChainPolicy.CustomTrustStore.Add(host.Authority.Root);
-			chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-			return chain.Build(certificate);
-		};
-		Client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
+		HttpClient Build(Version requestVersion) {
+			var handler = new HttpClientHandler {
+				Proxy = new WebProxy($"http://127.0.0.1:{host.Port}"),
+				UseProxy = true,
+				AllowAutoRedirect = false,
+				UseCookies = false,
+			};
+			// Like a browser with the mos root installed: accept a certificate only if it names the right host and chains to the mos root.
+			// Without that trust, certificate errors are left alone so the client behaves like a browser that has not installed it.
+			handler.ServerCertificateCustomValidationCallback = (_, certificate, _, errors) => {
+				ServerCertificateSeenByClient = certificate is null ? null : new X509Certificate2(certificate);
+				if (certificate is not null && AlsoTrust.Contains(certificate.Thumbprint)) return true;
+				if (!clientTrustsProxyCa || host.Authority is null) return errors == SslPolicyErrors.None;
+				if ((errors & SslPolicyErrors.RemoteCertificateNameMismatch) != 0 || certificate is null) return false;
+				using var chain = new X509Chain();
+				chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+				chain.ChainPolicy.CustomTrustStore.Add(host.Authority.Root);
+				chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+				return chain.Build(certificate);
+			};
+			return new HttpClient(handler) {
+				Timeout = TimeSpan.FromSeconds(30),
+				DefaultRequestVersion = requestVersion,
+				DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
+			};
+		}
+		Client = Build(HttpVersion.Version11);
+		Http2Client = Build(HttpVersion.Version20);
 	}
 
 	/// <summary>The certificate the client was shown by the last HTTPS server it connected to (through the proxy).</summary>
@@ -76,7 +84,11 @@ public sealed class TestProxy : IAsyncDisposable {
 	public CertificateAuthority? Authority => _host.Authority;
 
 	public MemoryExchangeLog Log { get; }
+	/// <summary>A client that speaks HTTP/1.1.</summary>
 	public HttpClient Client { get; }
+
+	/// <summary>A client that asks for HTTP/2 (and falls back to HTTP/1.1 if the server does not offer it), like a browser.</summary>
+	public HttpClient Http2Client { get; }
 	public int Port => _host.Port;
 	public string? CaptureRunDirectory => _host.CaptureRunDirectory;
 
@@ -88,6 +100,7 @@ public sealed class TestProxy : IAsyncDisposable {
 
 	public async ValueTask DisposeAsync() {
 		Client.Dispose();
+		Http2Client.Dispose();
 		await _host.DisposeAsync();
 	}
 }

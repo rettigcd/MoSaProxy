@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 namespace mos.Tests;
 
 /// <summary>What the fake origin saw for one request.</summary>
-public sealed record SeenRequest(string Method, string PathAndQuery, IHeaderDictionary Headers, byte[] Body, string ConnectionId);
+public sealed record SeenRequest(string Method, string PathAndQuery, IHeaderDictionary Headers, byte[] Body, string ConnectionId, string Protocol);
 
 /// <summary>A small in-process HTTP server on loopback that stands in for a real web site.</summary>
 public sealed class TestOrigin : IAsyncDisposable {
@@ -29,18 +29,23 @@ public sealed class TestOrigin : IAsyncDisposable {
 	public X509Certificate2? Certificate { get; }
 	public IReadOnlyList<SeenRequest> Seen { get { lock (_seen) return _seen.ToArray(); } }
 
-	public static async Task<TestOrigin> StartAsync(Func<HttpContext, Task> respond, bool https = false) {
+	/// <param name="https">Serve HTTPS with a self-signed certificate (which also allows HTTP/2).</param>
+	/// <param name="http1Only">Do not offer HTTP/2, so a client has to fall back to HTTP/1.1.</param>
+	public static async Task<TestOrigin> StartAsync(Func<HttpContext, Task> respond, bool https = false, bool http1Only = false) {
 		var builder = WebApplication.CreateSlimBuilder();
 		builder.Logging.ClearProviders();
 		var certificate = https ? CreateSelfSignedCertificate() : null;
-		builder.WebHost.ConfigureKestrel(k => k.Listen(IPAddress.Loopback, 0, listen => { if (certificate is not null) listen.UseHttps(certificate); }));
+		builder.WebHost.ConfigureKestrel(k => k.Listen(IPAddress.Loopback, 0, listen => {
+			if (certificate is not null) listen.UseHttps(certificate);
+			if (http1Only) listen.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1;
+		}));
 		var app = builder.Build();
 		TestOrigin? origin = null;
 		app.Run(async context => {
 			using var buffer = new MemoryStream();
 			await context.Request.Body.CopyToAsync(buffer);
 			var seen = new SeenRequest(context.Request.Method, context.Request.Path + context.Request.QueryString,
-				new HeaderDictionary(context.Request.Headers.ToDictionary(h => h.Key, h => h.Value)), buffer.ToArray(), context.Connection.Id);
+				new HeaderDictionary(context.Request.Headers.ToDictionary(h => h.Key, h => h.Value)), buffer.ToArray(), context.Connection.Id, context.Request.Protocol);
 			lock (origin!._seen) origin._seen.Add(seen);
 			await respond(context);
 		});
