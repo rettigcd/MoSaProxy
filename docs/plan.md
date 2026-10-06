@@ -101,7 +101,11 @@ Design points to settle during Phase 1b:
 
 - **Raw bytes versus reconstructed bytes.** The end goal is to capture exactly what is on the wire, not a
   reconstruction. Kestrel parses requests before our handler sees them, so while we build on Kestrel the files
-  are a faithful reconstruction: request/status line, headers in the order received, a blank line, then the body.
+  are a reconstruction: request/status line, headers, a blank line, then the body. Known differences from the
+  wire, seen in the first live capture: Kestrel reports request headers in its own order (not the order the client
+  sent them) with normalized casing; the origin's `Transfer-Encoding: chunked` header is kept but the body is stored
+  with the chunk framing already removed; and the request-side `Host`/`Proxy-Connection` headers appear as Kestrel
+  presents them.
   For HTTP/2 the headers are rendered in HTTP/1.1 text form (Fiddler does the same). This is a deliberate
   stop-gap: Phase 6 replaces or taps Kestrel to get byte-exact capture. Keep the capture code behind a small
   interface (for example `ISessionCapture`) so that the source of the bytes can change without touching the
@@ -117,7 +121,8 @@ Design points to settle during Phase 1b:
   The capture folder, the JSONL log and any `.saz` must be treated as sensitive: never commit them (add the folder to
   `.gitignore`) and delete them when done.
 - **Numbering.** Exchange numbers are assigned in the order requests arrive, so the number is stable even when
-  responses finish out of order. Writes happen on a background queue so capture does not slow down forwarding.
+  responses finish out of order. Phase 1b writes inline through buffered file streams; a background queue is a
+  later optimization if capture is found to slow forwarding.
 - **Metadata.** `_m.xml` should carry at least the fields in the log record (timestamps, client endpoint,
   protocol versions, status, byte counts, mode, error), written in Fiddler's schema where practical.
 
@@ -148,7 +153,7 @@ Design points to settle during Phase 1b:
 
 **Done when:** Chrome browses `http://` sites reliably through the proxy and every exchange is logged.
 
-### Phase 1b: Capture folder (Fiddler-style session files)
+### Phase 1b: Capture folder (Fiddler-style session files) *(done)*
 
 - Add a capture sink, enabled by `--capture <dir>`. Each run creates a new sub-folder under `<dir>`.
 - For every exchange, write `N_c.txt`, `N_s.txt` and `N_m.xml`, with `N` starting at 1 for each run and

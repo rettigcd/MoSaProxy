@@ -480,3 +480,8 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Captured traffic and logs contain credentials and cookies
+captures/
+*.jsonl
+*.saz

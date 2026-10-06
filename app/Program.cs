@@ -12,5 +12,6 @@ if (options.LogPath is not null) sinks.Add(new JsonLinesExchangeLog(options.LogP
 
 await using var proxy = await ProxyHost.StartAsync(options, new CompositeExchangeLog(sinks.ToArray()));
 Console.WriteLine($"HTTP proxy listening on 127.0.0.1:{proxy.Port}. Press Ctrl+C to stop.");
+if (proxy.CaptureRunDirectory is not null) Console.WriteLine($"Capturing sessions to {proxy.CaptureRunDirectory}");
 await proxy.WaitForShutdownAsync();
 return 0;

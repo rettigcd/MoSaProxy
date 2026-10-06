@@ -18,7 +18,7 @@ public class ExchangeLogTests {
 		await (await proxy.Client.GetAsync(url)).Content.ReadAsStringAsync();
 
 		// Then: exactly one record was logged, with the method, full URL, status, byte count and protocol versions
-		var record = proxy.Log.Records.Single();
+		var record = (await proxy.Log.WaitForAsync()).Single();
 		record.Method.ShouldBe("GET");
 		record.Url.ShouldBe(url);
 		record.Host.ShouldBe("127.0.0.1");
@@ -42,7 +42,7 @@ public class ExchangeLogTests {
 		await proxy.Client.PostAsync(origin.UrlFor("/up"), new ByteArrayContent(new byte[1234]));
 
 		// Then: the logged record shows 1,234 request bytes
-		proxy.Log.Records.Single().RequestBytes.ShouldBe(1234);
+		(await proxy.Log.WaitForAsync()).Single().RequestBytes.ShouldBe(1234);
 	}
 
 	[Fact]
@@ -59,7 +59,7 @@ public class ExchangeLogTests {
 		await proxy.Client.SendAsync(request);
 
 		// Then: the log shows the real Authorization, Cookie and Set-Cookie values (nothing is redacted), and the origin got them too
-		var record = proxy.Log.Records.Single();
+		var record = (await proxy.Log.WaitForAsync()).Single();
 		record.RequestHeaders["Authorization"].ShouldBe("Bearer topsecret");
 		record.RequestHeaders["Cookie"].ShouldBe("a=b");
 		record.ResponseHeaders["Set-Cookie"].ShouldBe("session=secret");
@@ -81,7 +81,7 @@ public class ExchangeLogTests {
 		await proxy.Client.GetAsync($"http://127.0.0.1:{deadPort}/");
 
 		// Then: the logged record has status 502 and an error message
-		var record = proxy.Log.Records.Single();
+		var record = (await proxy.Log.WaitForAsync()).Single();
 		record.Status.ShouldBe(502);
 		record.Error.ShouldNotBeNull();
 	}

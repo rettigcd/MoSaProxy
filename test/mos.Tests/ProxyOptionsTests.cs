@@ -32,7 +32,39 @@ public class ProxyOptionsTests {
 		options.LogPath.ShouldBe("traffic.jsonl");
 	}
 
+	[Fact]
+	public void Parse_CaptureArguments_AreApplied() {
+
+		// Given: arguments enabling capture into a folder with a 1,000-byte body cap
+		var args = new[] { "--capture", "captures", "--capture-max-body", "1000" };
+
+		// When: the options are parsed
+		var options = ProxyOptions.Parse(args);
+
+		// Then: the options carry the folder and the cap
+		options.CaptureDirectory.ShouldBe("captures");
+		options.CaptureMaxBodyBytes.ShouldBe(1000);
+	}
+
+	[Fact]
+	public void Parse_NoCaptureArguments_LeavesCaptureOff() {
+
+		// Given: no command-line arguments
+		var args = Array.Empty<string>();
+
+		// When: the options are parsed
+		var options = ProxyOptions.Parse(args);
+
+		// Then: capture is off and there is no body cap
+		options.CaptureDirectory.ShouldBeNull();
+		options.CaptureMaxBodyBytes.ShouldBeNull();
+	}
+
 	[Theory]
+	[InlineData("--capture")]
+	[InlineData("--capture-max-body")]
+	[InlineData("--capture-max-body", "-5")]
+	[InlineData("--capture-max-body", "lots")]
 	[InlineData("--port", "abc")]
 	[InlineData("--port", "70000")]
 	[InlineData("--port")]
