@@ -12,7 +12,9 @@ public sealed record WebSocketSummary(int Status, long ClientBytes, long OriginB
 /// then accepts the client's WebSocket and copies messages between the two. Works for HTTP/1.1 upgrades and for
 /// WebSockets over HTTP/2. The two connections are independent, so ping/pong and compression are handled separately on each side.
 /// </summary>
-public sealed class WebSocketProxy(HttpMessageInvoker upstream, ProxyOptions options, CancellationToken shutdown) {
+/// <param name="stopping">Signalled when the proxy starts shutting down: both legs of every open connection are sent a close (1001, going away).</param>
+/// <param name="shutdown">Signalled when the drain period is over: connections that have not finished closing are aborted.</param>
+public sealed class WebSocketProxy(HttpMessageInvoker upstream, ProxyOptions options, CancellationToken stopping, CancellationToken shutdown) {
 
 	const int BufferSize = 64 * 1024;
 
@@ -66,6 +68,9 @@ public sealed class WebSocketProxy(HttpMessageInvoker upstream, ProxyOptions opt
 		});
 		onConnected();
 
+		// Shutdown: tell both ends the connection is going away, then let the normal close handshake finish.
+		using var closeOnStopping = stopping.Register(() => _ = CloseBothAsync(client, origin));
+
 		var totals = new Totals();
 		using var done = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, shutdown);
 		await Task.WhenAll(
@@ -76,6 +81,19 @@ public sealed class WebSocketProxy(HttpMessageInvoker upstream, ProxyOptions opt
 	}
 
 	static WebSocketSummary Failed(int status, string error) => new(status, 0, 0, 0, 0, error);
+
+	static async Task CloseBothAsync(WebSocket client, WebSocket origin) =>
+		await Task.WhenAll(CloseOutputQuietlyAsync(client), CloseOutputQuietlyAsync(origin));
+
+	static async Task CloseOutputQuietlyAsync(WebSocket socket) {
+		try {
+			if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+				await socket.CloseOutputAsync(WebSocketCloseStatus.EndpointUnavailable, "the proxy is shutting down", CancellationToken.None);
+		}
+		catch (Exception ex) when (ex is WebSocketException or ObjectDisposedException or InvalidOperationException) {
+			// the connection ended on its own while we were closing it
+		}
+	}
 
 	static async Task<WebSocketSummary> RejectAsync(HttpContext context, IExchangeCapture capture, int status, string error) {
 		if (!context.Response.HasStarted) {
@@ -101,7 +119,12 @@ public sealed class WebSocketProxy(HttpMessageInvoker upstream, ProxyOptions opt
 					string description = from.CloseStatusDescription ?? "";
 					capture.WriteWebSocketMessage(fromClient, WebSocketMessageType.Close, System.Text.Encoding.UTF8.GetBytes(description), description.Length,
 						note: $"status {(from.CloseStatus is { } s ? (int)s : 1005)}");
-					await to.CloseOutputAsync(SendableCloseStatus(from.CloseStatus), description, done.Token);
+					try {
+						// If this side was already closed because the proxy is stopping, the peer's reply needs no forwarding.
+						if (to.State is WebSocketState.Open or WebSocketState.CloseReceived)
+							await to.CloseOutputAsync(SendableCloseStatus(from.CloseStatus), description, done.Token);
+					}
+					catch (WebSocketException) when (stopping.IsCancellationRequested) { }
 					return;
 				}
 

@@ -23,8 +23,11 @@ namespace mos;
 /// then passes the decrypted connection on to Kestrel as ordinary HTTP/1.1 traffic).
 /// </para>
 /// </summary>
+/// <param name="stopping">Signalled when the proxy starts shutting down: idle connections and quiet tunnels end, busy ones may finish.</param>
+/// <param name="shutdown">Signalled when the drain period is over: whatever is left is aborted.</param>
 public sealed class TunnelHandler(
-	IExchangeLog log, ISessionCapture capture, ProxyOptions options, CancellationToken shutdown, CertificateAuthority? authority = null) {
+	IExchangeLog log, ISessionCapture capture, ProxyOptions options, CancellationToken stopping, CancellationToken shutdown,
+	ProxyActivity activity, CertificateAuthority? authority = null) {
 
 	/// <summary>Key in the connection's Items holding the https:// base URI of an intercepted connection.</summary>
 	public const string InterceptTargetKey = "mos.intercept-target";
@@ -36,7 +39,16 @@ public sealed class TunnelHandler(
 	public async Task HandleAsync(ConnectionContext connection, ConnectionDelegate next) {
 		var input = connection.Transport.Input;
 
-		if (!await StartsWithConnectAsync(input, connection.ConnectionClosed)) {
+		// A connection that has not sent anything yet (browsers open spare ones in advance) must not hold up a shutdown.
+		bool startsWithConnect;
+		try {
+			using var waiting = CancellationTokenSource.CreateLinkedTokenSource(connection.ConnectionClosed, stopping);
+			startsWithConnect = await StartsWithConnectAsync(input, waiting.Token);
+		}
+		catch (OperationCanceledException) {
+			return;
+		}
+		if (!startsWithConnect) {
 			await next(connection);
 			return;
 		}
@@ -133,9 +145,10 @@ public sealed class TunnelHandler(
 
 				// Bytes the client sent right after its request head are still in the pipe and are relayed first.
 				using var client = new DuplexStream(input.AsStream(), connection.Transport.Output.AsStream());
+				using var tracking = activity.Track(ActivityKind.Tunnel);
 				// Not tied to ConnectionClosed: Kestrel fires that as soon as the client half-closes (stops sending),
 				// but the origin's reply may still be on its way. The idle timeout and proxy shutdown end stuck tunnels.
-				(toOrigin, fromOrigin) = await TunnelRelay.RelayAsync(client, origin, options.TunnelIdleTimeout, shutdown);
+				(toOrigin, fromOrigin) = await TunnelRelay.RelayAsync(client, origin, options.TunnelIdleTimeout, shutdown, stopping);
 			}
 		}
 		catch (Exception ex) when (ex is not OutOfMemoryException) {
@@ -189,7 +202,8 @@ public sealed class TunnelHandler(
 		try {
 			using var origin = await TunnelRelay.ConnectAsync(host, port, options.ConnectTimeout, connection.ConnectionClosed);
 			using var client = new DuplexStream(connection.Transport.Input.AsStream(), connection.Transport.Output.AsStream());
-			(toOrigin, fromOrigin) = await TunnelRelay.RelayAsync(client, origin, options.TunnelIdleTimeout, shutdown);
+			using var tracking = activity.Track(ActivityKind.Tunnel);
+			(toOrigin, fromOrigin) = await TunnelRelay.RelayAsync(client, origin, options.TunnelIdleTimeout, shutdown, stopping);
 		}
 		catch (Exception ex) when (ex is not OutOfMemoryException) {
 			error = $"origin unreachable: {ex.Message}";

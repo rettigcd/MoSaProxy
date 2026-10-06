@@ -8,6 +8,21 @@ public sealed class ProxyOptions {
 	/// <summary>Optional path of a JSON Lines file that every exchange is appended to.</summary>
 	public string? LogPath { get; init; }
 
+	/// <summary>
+	/// The log file is rotated when a write would take it past this many bytes: it becomes name.1.ext, older rotated files shift up
+	/// (name.2.ext and so on), and the oldest beyond <see cref="LogKeep"/> is deleted. 0 means never rotate. Default 50 MB.
+	/// </summary>
+	public long LogMaxBytes { get; init; } = 50L * 1024 * 1024;
+
+	/// <summary>How many rotated log files to keep next to the current one (0 means a rotated file is simply discarded).</summary>
+	public int LogKeep { get; init; } = 5;
+
+	/// <summary>
+	/// When stopping, how long running exchanges, busy tunnels and closing WebSockets get to finish before they are aborted.
+	/// 0 stops at once. Default 10 seconds.
+	/// </summary>
+	public TimeSpan DrainTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
 	/// <summary>How long to wait for the origin to start responding before answering 504.</summary>
 	public TimeSpan UpstreamTimeout { get; init; } = TimeSpan.FromSeconds(100);
 
@@ -78,6 +93,9 @@ public sealed class ProxyOptions {
 		string caDirectory = DefaultCaDirectory;
 		bool untrustCa = false;
 		bool http2 = true;
+		long logMaxBytes = 50L * 1024 * 1024;
+		int logKeep = 5;
+		var drainTimeout = TimeSpan.FromSeconds(10);
 		string? exportSazFolder = null, exportSazOutput = null;
 		bool sazOnShutdown = false;
 		for (int i = 0; i < args.Length; i++) {
@@ -114,6 +132,24 @@ public sealed class ProxyOptions {
 				case "--saz":
 					sazOnShutdown = true;
 					break;
+				case "--log-max-mb":
+					if (i + 1 >= args.Length
+						|| !double.TryParse(args[++i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double megabytes)
+						|| megabytes < 0 || megabytes > 1_000_000)
+						throw new ArgumentException("--log-max-mb requires a number of megabytes (0 means never rotate).");
+					logMaxBytes = (long)(megabytes * 1024 * 1024);
+					break;
+				case "--log-keep":
+					if (i + 1 >= args.Length || !int.TryParse(args[++i], out logKeep) || logKeep < 0 || logKeep > 1000)
+						throw new ArgumentException("--log-keep requires a number from 0 to 1000.");
+					break;
+				case "--drain-timeout":
+					if (i + 1 >= args.Length
+						|| !double.TryParse(args[++i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double drainSeconds)
+						|| drainSeconds < 0 || drainSeconds > 3600)
+						throw new ArgumentException("--drain-timeout requires a number of seconds from 0 to 3600 (0 stops at once).");
+					drainTimeout = TimeSpan.FromSeconds(drainSeconds);
+					break;
 				case "--no-http2":
 					http2 = false;
 					break;
@@ -132,7 +168,7 @@ public sealed class ProxyOptions {
 					caDirectory = args[++i];
 					break;
 				default:
-					throw new ArgumentException($"Unknown argument '{args[i]}'. Usage: mos [--port N] [--log FILE] [--capture DIR] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] [--intercept-bypass HOSTS] [--ca-dir DIR] [--untrust-ca] [--no-http2] [--saz] [--export-saz RUN_DIR [FILE]]");
+					throw new ArgumentException($"Unknown argument '{args[i]}'. Usage: mos [--port N] [--log FILE] [--capture DIR] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] [--intercept-bypass HOSTS] [--ca-dir DIR] [--untrust-ca] [--no-http2] [--saz] [--export-saz RUN_DIR [FILE]] [--log-max-mb N] [--log-keep N] [--drain-timeout SECONDS]");
 			}
 		}
 		if (bypass.Count > 0 && !intercept) throw new ArgumentException("--intercept-bypass only makes sense together with --intercept.");
@@ -141,6 +177,7 @@ public sealed class ProxyOptions {
 			Port = port, LogPath = logPath, CaptureDirectory = captureDirectory, CaptureMaxBodyBytes = captureMaxBody,
 			ConnectTimeout = connectTimeout, Intercept = intercept, InterceptBypass = bypass, CaDirectory = caDirectory, UntrustCa = untrustCa, EnableHttp2 = http2,
 			ExportSazFolder = exportSazFolder, ExportSazOutput = exportSazOutput, SazOnShutdown = sazOnShutdown,
+			LogMaxBytes = logMaxBytes, LogKeep = logKeep, DrainTimeout = drainTimeout,
 		};
 	}
 }

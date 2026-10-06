@@ -282,7 +282,23 @@ Original scope for reference:
   client (`SniffTimeout`, default 3 s, for protocols where the server speaks first), is relayed blindly.
 - Optional proxy authentication, and access control by client IP. **Dropped:** the listener only accepts loopback
   connections, so there is nobody to authenticate or filter.
-- Request and connection limits, graceful shutdown, log rotation.
+- **Log rotation *(done)*:** `--log-max-mb N` (default 50, 0 = never rotate) and `--log-keep N` (default 5). When a write
+  would take `traffic.jsonl` past the limit it becomes `traffic.1.jsonl`, older files shift up (`.2`, `.3`, ...) and the
+  oldest beyond the keep count is deleted. A line larger than the limit is still written. If a rotation fails (for example
+  a viewer holds a file open) it is reported once, and logging carries on into the current file instead of losing lines.
+  A file left over from an earlier run is rotated on its first write. The capture folder is not rotated here (see the
+  safety limits discussion).
+- **Graceful shutdown with a drain period *(done)*:** `--drain-timeout SECONDS` (default 10, 0 = stop at once).
+  The first Ctrl+C stops accepting connections and reports what is in flight. During the drain, running requests finish;
+  tunnels keep going while data moves and end after 1 s of quiet; WebSockets are sent a close with code 1001; idle
+  keep-alive and HTTP/2 connections and connections that never sent anything are closed straight away. At the deadline
+  whatever is left is aborted (still logged and captured, with no status if nothing had been sent) and counted in the final
+  message. A second Ctrl+C skips the wait. The `--saz` archive is written only after all of that, so it is complete.
+  Note: `WebApplication.WaitForShutdownAsync` stops the host with its own time limit as soon as it is signalled, so
+  `ProxyHost.WaitForStopRequestAsync` is used instead, and `StopAsync` does the draining. Verified with the test suite and
+  with a real process receiving a real console interrupt (one interrupt: the in-flight request completed and the archive
+  was written; two: the 30 s drain was skipped and the request aborted).
+- Request and connection limits: **to be discussed** (what to cap, and what the defaults should be).
 - **`.saz` export *(done, not yet opened in Fiddler)*:** `SazExporter` packs a capture run folder into a `.saz` (a zip).
   `--export-saz RUN_DIR [FILE]` converts an existing folder (default output: the folder path plus `.saz`), and `--saz`
   (with `--capture`) writes the archive for the run when the proxy stops.

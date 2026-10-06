@@ -163,6 +163,74 @@ public class ProxyOptionsTests {
 	}
 
 	[Fact]
+	public void Parse_NoRotationOrDrainArguments_UsesTheDefaults() {
+
+		// Given: no command-line arguments
+		var args = Array.Empty<string>();
+
+		// When: the options are parsed
+		var options = ProxyOptions.Parse(args);
+
+		// Then: the log rotates at 50 MB keeping 5 files, and stopping waits up to 10 seconds
+		options.LogMaxBytes.ShouldBe(50L * 1024 * 1024);
+		options.LogKeep.ShouldBe(5);
+		options.DrainTimeout.ShouldBe(TimeSpan.FromSeconds(10));
+	}
+
+	[Fact]
+	public void Parse_RotationAndDrainArguments_AreApplied() {
+
+		// Given: arguments setting a 2.5 MB limit, 3 kept files and a 4.5 second drain
+		var args = new[] { "--log-max-mb", "2.5", "--log-keep", "3", "--drain-timeout", "4.5" };
+
+		// When: the options are parsed
+		var options = ProxyOptions.Parse(args);
+
+		// Then: the values are used (2.5 MB is 2,621,440 bytes)
+		options.LogMaxBytes.ShouldBe(2_621_440);
+		options.LogKeep.ShouldBe(3);
+		options.DrainTimeout.ShouldBe(TimeSpan.FromSeconds(4.5));
+	}
+
+	[Fact]
+	public void Parse_ZeroValues_TurnRotationOffKeepNothingAndStopAtOnce() {
+
+		// Given: arguments that set the limit, the kept files and the drain to zero
+		var args = new[] { "--log-max-mb", "0", "--log-keep", "0", "--drain-timeout", "0" };
+
+		// When: the options are parsed
+		var options = ProxyOptions.Parse(args);
+
+		// Then: all three are accepted as zero
+		options.LogMaxBytes.ShouldBe(0);
+		options.LogKeep.ShouldBe(0);
+		options.DrainTimeout.ShouldBe(TimeSpan.Zero);
+	}
+
+	[Theory]
+	[InlineData("--log-max-mb")]
+	[InlineData("--log-max-mb", "-1")]
+	[InlineData("--log-max-mb", "lots")]
+	[InlineData("--log-keep")]
+	[InlineData("--log-keep", "-1")]
+	[InlineData("--log-keep", "5000")]
+	[InlineData("--log-keep", "1.5")]
+	[InlineData("--drain-timeout")]
+	[InlineData("--drain-timeout", "-1")]
+	[InlineData("--drain-timeout", "soon")]
+	[InlineData("--drain-timeout", "99999")]
+	public void Parse_InvalidRotationOrDrainArguments_Throws(params string[] args) {
+
+		// Given: a missing, negative, non-numeric or out-of-range value (supplied by the test data)
+
+		// When: the options are parsed
+		var parse = () => ProxyOptions.Parse(args);
+
+		// Then: parsing fails with an ArgumentException
+		Should.Throw<ArgumentException>(parse);
+	}
+
+	[Fact]
 	public void Parse_NoHttp2Argument_TurnsHttp2OffAndItDefaultsToOn() {
 
 		// Given: no arguments, and separately the --no-http2 argument

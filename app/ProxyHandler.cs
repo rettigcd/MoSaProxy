@@ -14,9 +14,12 @@ public sealed class ProxyHandler : IDisposable {
 	readonly ISessionCapture _capture;
 	readonly ProxyOptions _options;
 	readonly WebSocketProxy _webSockets;
+	readonly ProxyActivity _activity;
 
-	public ProxyHandler(IExchangeLog log, ISessionCapture capture, ProxyOptions options, CancellationToken shutdown = default) {
+	public ProxyHandler(IExchangeLog log, ISessionCapture capture, ProxyOptions options, ProxyActivity activity,
+		CancellationToken stopping = default, CancellationToken shutdown = default) {
 		_log = log;
+		_activity = activity;
 		_capture = capture;
 		_options = options;
 		var handler = new SocketsHttpHandler {
@@ -28,7 +31,7 @@ public sealed class ProxyHandler : IDisposable {
 		if (options.OriginCertificateValidation is { } validation)
 			handler.SslOptions.RemoteCertificateValidationCallback = validation;
 		_client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
-		_webSockets = new WebSocketProxy(_client, options, shutdown);
+		_webSockets = new WebSocketProxy(_client, options, stopping, shutdown);
 	}
 
 	public void Dispose() => _client.Dispose();
@@ -54,12 +57,16 @@ public sealed class ProxyHandler : IDisposable {
 			uri = rawTarget.StartsWith('/') && Uri.TryCreate(interceptBase, rawTarget, out var combined) ? combined : null;
 		else
 			Uri.TryCreate(rawTarget, UriKind.Absolute, out uri);
+		// Counted so a shutdown can report what it is waiting for: a WebSocket is long-lived, any other request is an exchange.
+		bool isWebSocket = context.WebSockets.IsWebSocketRequest && uri is not null && (interceptBase is not null || uri.Scheme == Uri.UriSchemeHttp);
+		using var tracking = _activity.Track(isWebSocket ? ActivityKind.WebSocket : ActivityKind.Exchange);
 		var counted = new CountingStream(request.Body);
 		long responseBytes = 0;
 		string mode = interceptBase is null ? "plain" : "intercept";
 		string? error = null;
 		string? originVersion = null;
 		int? statusOverride = null;
+		bool nothingSent = false;      // the exchange ended before any response reached the client, so there is no status to report
 		long? requestBytesOverride = null;
 		int? clientMessages = null, originMessages = null;
 
@@ -89,11 +96,11 @@ public sealed class ProxyHandler : IDisposable {
 			capture.WriteRequestHead(request.Method, rawTarget, request.Protocol,
 				request.Headers.Select(h => KeyValuePair.Create(h.Key, h.Value.ToString())));
 
-			if (context.WebSockets.IsWebSocketRequest && uri is not null && (interceptBase is not null || uri.Scheme == Uri.UriSchemeHttp)) {
+			if (isWebSocket) {
 				// A WebSocket connection (an HTTP/1.1 upgrade, or HTTP/2 extended CONNECT) lives for as long as the client keeps it.
 				// The handshake is logged as soon as it succeeds, and a second record with the totals when the connection closes.
 				mode = "websocket";
-				var summary = await _webSockets.RunAsync(context, capture, uri, () => _log.Write(MakeRecord("websocket", 101, 0, 0, null)));
+				var summary = await _webSockets.RunAsync(context, capture, uri!, () => _log.Write(MakeRecord("websocket", 101, 0, 0, null)));
 				mode = summary.Status == 101 ? "websocket-closed" : "rejected";
 				statusOverride = summary.Status == 0 ? null : summary.Status;
 				requestBytesOverride = summary.ClientBytes;
@@ -119,6 +126,8 @@ public sealed class ProxyHandler : IDisposable {
 		}
 		catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) {
 			error = "client disconnected";
+			// (the default 200 of an unanswered response would be misleading)
+			nothingSent = !context.Response.HasStarted;
 		}
 		catch (OperationCanceledException) {
 			error = "origin timed out";
@@ -134,7 +143,7 @@ public sealed class ProxyHandler : IDisposable {
 			else await TryRespondAsync(context, capture, 502, "Proxy error.");
 		}
 		finally {
-			var record = MakeRecord(mode, statusOverride ?? context.Response.StatusCode, requestBytesOverride ?? counted.BytesRead, responseBytes, error);
+			var record = MakeRecord(mode, nothingSent ? null : statusOverride ?? context.Response.StatusCode, requestBytesOverride ?? counted.BytesRead, responseBytes, error);
 			_log.Write(record);
 			capture.Complete(record);
 		}

@@ -112,6 +112,12 @@ public sealed class TestProxy : IAsyncDisposable {
 	public int Port => _host.Port;
 	public string? CaptureRunDirectory => _host.CaptureRunDirectory;
 
+	/// <summary>How many requests, tunnels and WebSockets are in flight right now.</summary>
+	public ProxyActivity Activity => _host.Activity;
+
+	/// <summary>Starts a graceful stop (see <see cref="ProxyHost.StopAsync"/>). Disposing the proxy afterwards is still fine.</summary>
+	public Task<ShutdownReport> StopAsync(TimeSpan drainTimeout, CancellationToken skipDrain = default) => _host.StopAsync(drainTimeout, skipDrain);
+
 	public static async Task<TestProxy> StartAsync(ProxyOptions? options = null, ISessionCapture? capture = null, bool clientTrustsProxyCa = true) {
 		var log = new MemoryExchangeLog();
 		var host = await ProxyHost.StartAsync(options ?? new ProxyOptions { Port = 0 }, log, capture);

@@ -5,6 +5,11 @@ namespace mos;
 /// <summary>Opens the connection for a CONNECT request and relays bytes in both directions.</summary>
 public static class TunnelRelay {
 
+	/// <summary>While the proxy is shutting down, a tunnel with no data moving for this long is closed.</summary>
+	public static readonly TimeSpan StoppingQuietPeriod = TimeSpan.FromSeconds(1);
+
+	static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(250);
+
 	/// <summary>Parses the "host:port" target of a CONNECT request.</summary>
 	public static bool TryParseTarget(string target, out string host, out int port) {
 		host = "";
@@ -34,9 +39,11 @@ public static class TunnelRelay {
 	/// Copies bytes between the client and the origin until the origin closes, the client disconnects,
 	/// or no data moves in either direction for <paramref name="idleTimeout"/>.
 	/// A client that finishes sending first only half-closes the origin, so the response can still arrive.
+	/// Once <paramref name="stopping"/> is signalled (the proxy is shutting down) the tunnel is given a short quiet period
+	/// instead of the full idle timeout: a transfer that is still moving data carries on, an idle one ends.
 	/// </summary>
 	public static async Task<(long ToOrigin, long FromOrigin)> RelayAsync(
-		Stream client, TcpClient originConnection, TimeSpan idleTimeout, CancellationToken cancellationToken) {
+		Stream client, TcpClient originConnection, TimeSpan idleTimeout, CancellationToken cancellationToken, CancellationToken stopping = default) {
 
 		using var done = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		var origin = originConnection.GetStream();
@@ -57,9 +64,12 @@ public static class TunnelRelay {
 
 		async Task WatchIdleAsync() {
 			while (!done.IsCancellationRequested) {
-				var remaining = idleTimeout - TimeSpan.FromMilliseconds(Environment.TickCount64 - Volatile.Read(ref lastActivity));
+				var limit = stopping.IsCancellationRequested && StoppingQuietPeriod < idleTimeout ? StoppingQuietPeriod : idleTimeout;
+				var remaining = limit - TimeSpan.FromMilliseconds(Environment.TickCount64 - Volatile.Read(ref lastActivity));
 				if (remaining <= TimeSpan.Zero) { done.Cancel(); return; }
-				try { await Task.Delay(remaining, done.Token); } catch (OperationCanceledException) { return; }
+				// Wake up when the limit could be reached, but also soon enough to notice that shutdown has started.
+				var wait = stopping.IsCancellationRequested || remaining < PollInterval ? remaining : PollInterval;
+				try { await Task.Delay(wait, done.Token); } catch (OperationCanceledException) { return; }
 			}
 		}
 
