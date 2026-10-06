@@ -159,19 +159,6 @@ public class ProxyForwardingTests {
 	}
 
 	[Fact]
-	public async Task Connect_Request_IsRejectedWith405() {
-
-		// Given: a running proxy (HTTPS tunneling is not implemented yet)
-		await using var proxy = await TestProxy.StartAsync();
-
-		// When: a client sends a CONNECT request for example.com:443
-		var answer = await RawHttp.SendAsync(proxy.Port, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\nConnection: close\r\n\r\n");
-
-		// Then: the proxy answers 405 Method Not Allowed
-		answer.ShouldStartWith("HTTP/1.1 405");
-	}
-
-	[Fact]
 	public async Task Get_OriginFormTarget_IsRejectedWith400() {
 
 		// Given: a running proxy

@@ -167,7 +167,16 @@ Design points to settle during Phase 1b:
 **Done when:** browsing through the proxy with `--capture` produces a run folder whose files match what was sent
 and received.
 
-### Phase 2: HTTPS blind tunnel
+### Phase 2: HTTPS blind tunnel *(done)*
+
+Outcome of the Kestrel check: Kestrel's `IHttpUpgradeFeature` refuses to upgrade a `CONNECT` request ("non-upgradable"),
+so tunnels are handled by a connection middleware (`TunnelHandler`) that runs in front of Kestrel's HTTP parser.
+It peeks at the first bytes of each connection, takes over those that begin with `CONNECT `, and hands everything
+else to Kestrel unchanged. This is also the hook point for the Phase 6 wire tap (option A).
+Kestrel's `ConnectionClosed` token fires as soon as the client half-closes, so tunnels are not tied to it; they end
+when the origin closes, on error, after an idle timeout (`TunnelIdleTimeout`, default 5 minutes), or at proxy shutdown.
+Connecting to the origin times out after `ConnectTimeout` (default 15 seconds). TLS SNI is not logged (it would
+require parsing the ClientHello); that is left for Phase 3, where TLS is terminated anyway.
 
 - Implement `CONNECT`: connect to the target, reply `200 Connection Established`, then relay bytes both ways.
 - Log host, port, bytes in/out, duration, and the TLS SNI if cheaply available.

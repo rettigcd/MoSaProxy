@@ -11,9 +11,11 @@ namespace mos;
 public sealed class ProxyHost : IAsyncDisposable {
 	readonly WebApplication _app;
 	readonly ProxyHandler _handler;
+	readonly CancellationTokenSource _shutdown;
 
-	ProxyHost(WebApplication app, ProxyHandler handler, int port, string? captureRunDirectory) {
+	ProxyHost(WebApplication app, ProxyHandler handler, CancellationTokenSource shutdown, int port, string? captureRunDirectory) {
 		_app = app;
+		_shutdown = shutdown;
 		_handler = handler;
 		Port = port;
 		CaptureRunDirectory = captureRunDirectory;
@@ -36,12 +38,15 @@ public sealed class ProxyHost : IAsyncDisposable {
 			}
 		}
 
+		var shutdown = new CancellationTokenSource();
+		var tunnels = new TunnelHandler(log, capture, options, shutdown.Token);
 		var builder = WebApplication.CreateSlimBuilder();
 		builder.Logging.ClearProviders();
 		builder.WebHost.ConfigureKestrel(kestrel => {
 			kestrel.AddServerHeader = false;
 			kestrel.Limits.MaxRequestBodySize = null;
-			kestrel.Listen(IPAddress.Loopback, options.Port);
+			// The tunnel handler sits in front of Kestrel's HTTP handling and takes over CONNECT connections.
+			kestrel.Listen(IPAddress.Loopback, options.Port, listen => listen.Use(next => connection => tunnels.HandleAsync(connection, next)));
 		});
 
 		var app = builder.Build();
@@ -50,12 +55,13 @@ public sealed class ProxyHost : IAsyncDisposable {
 		await app.StartAsync();
 
 		var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
-		return new ProxyHost(app, handler, new Uri(address).Port, runDirectory);
+		return new ProxyHost(app, handler, shutdown, new Uri(address).Port, runDirectory);
 	}
 
 	public Task WaitForShutdownAsync() => _app.WaitForShutdownAsync();
 
 	public async ValueTask DisposeAsync() {
+		_shutdown.Cancel(); // end any open tunnels so stopping does not wait for them
 		await _app.StopAsync();
 		await _app.DisposeAsync();
 		_handler.Dispose();

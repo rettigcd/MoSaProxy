@@ -11,6 +11,12 @@ public sealed class ProxyOptions {
 	/// <summary>How long to wait for the origin to start responding before answering 504.</summary>
 	public TimeSpan UpstreamTimeout { get; init; } = TimeSpan.FromSeconds(100);
 
+	/// <summary>How long to wait when opening a connection to the origin for a CONNECT tunnel.</summary>
+	public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(15);
+
+	/// <summary>A tunnel with no data moving in either direction for this long is closed.</summary>
+	public TimeSpan TunnelIdleTimeout { get; init; } = TimeSpan.FromMinutes(5);
+
 	/// <summary>Optional folder for per-exchange capture files. Each run gets its own sub-folder.</summary>
 	public string? CaptureDirectory { get; init; }
 

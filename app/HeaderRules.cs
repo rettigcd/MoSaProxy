@@ -27,4 +27,12 @@ public static class HeaderRules {
 			result[name] = values.ToString();
 		return result;
 	}
+
+	/// <summary>Flattens an already-parsed header list for logging (duplicate names are joined with ", ").</summary>
+	public static Dictionary<string, string> ForLog(IEnumerable<KeyValuePair<string, string>> headers) {
+		var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+		foreach (var (name, value) in headers)
+			result[name] = result.TryGetValue(name, out var existing) ? $"{existing}, {value}" : value;
+		return result;
+	}
 }

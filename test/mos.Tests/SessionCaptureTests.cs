@@ -125,18 +125,28 @@ public class SessionCaptureTests {
 	}
 
 	[Fact]
-	public async Task Connect_RejectedRequest_IsStillCapturedWithTheProxysOwnResponse() {
+	public async Task Connect_Tunnel_IsCapturedAsTheRequestAndTheEstablishedResponse() {
 
-		// Given: a proxy capturing into a new folder (it rejects CONNECT for now)
+		// Given: an echoing origin and a proxy capturing into a new folder
 		using var folder = new TempFolder();
+		await using var origin = TestTcpOrigin.Echo();
 		await using var proxy = await TestProxy.StartAsync(CaptureTo(folder));
+		using var client = await RawClient.ConnectAsync(proxy.Port);
 
-		// When: a client sends a CONNECT request
-		await RawHttp.SendAsync(proxy.Port, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\nConnection: close\r\n\r\n");
+		// When: a client opens a tunnel, sends some data through it, and closes
+		await client.SendAsync($"CONNECT 127.0.0.1:{origin.Port} HTTP/1.1\r\nHost: 127.0.0.1:{origin.Port}\r\n\r\n");
+		await client.ReadUntilAsync("\r\n\r\n");
+		await client.SendAsync("secret bytes");
+		await client.ReadExactlyAsync(12);
+		client.Dispose();
 
-		// Then: the capture holds the CONNECT request and the proxy's 405 response
-		Text(await ReadCapturedAsync(proxy, "1_c.txt")).ShouldStartWith("CONNECT example.com:443 HTTP/1.1\r\n");
-		Text(await ReadCapturedAsync(proxy, "1_s.txt")).ShouldStartWith("HTTP/1.1 405 Method Not Allowed\r\n");
+		// Then: the capture holds the CONNECT request and the 200 response, but not the tunneled bytes, and the metadata says it was a tunnel
+		var request = Text(await ReadCapturedAsync(proxy, "1_c.txt"));
+		request.ShouldStartWith($"CONNECT 127.0.0.1:{origin.Port} HTTP/1.1\r\n");
+		request.ShouldNotContain("secret bytes");
+		var response = Text(await ReadCapturedAsync(proxy, "1_s.txt"));
+		response.ShouldBe("HTTP/1.1 200 Connection Established\r\n\r\n");
+		XDocument.Load(Path.Combine(proxy.CaptureRunDirectory!, "1_m.xml")).Root!.Element("Mode")!.Value.ShouldBe("tunnel");
 	}
 
 	[Fact]

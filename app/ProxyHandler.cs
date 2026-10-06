@@ -51,9 +51,11 @@ public sealed class ProxyHandler : IDisposable {
 				request.Headers.Select(h => KeyValuePair.Create(h.Key, h.Value.ToString())));
 
 			if (HttpMethods.IsConnect(request.Method)) {
+				// CONNECT tunnels are taken over by TunnelHandler before Kestrel parses the request;
+				// one that still arrives here has nowhere to go.
 				mode = "rejected";
-				error = "CONNECT is not supported yet";
-				await RespondAsync(context, capture, 405, "This proxy does not support HTTPS (CONNECT) yet.");
+				error = "CONNECT reached the HTTP handler";
+				await RespondAsync(context, capture, 405, "CONNECT is handled at the connection level.");
 			}
 			else if (uri is null || uri.Scheme != Uri.UriSchemeHttp) {
 				mode = "rejected";
