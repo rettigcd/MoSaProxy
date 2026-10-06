@@ -105,6 +105,64 @@ public class ProxyOptionsTests {
 	}
 
 	[Fact]
+	public void Parse_ExportSazWithFolderOnly_LeavesTheOutputToTheDefault() {
+
+		// Given: arguments asking to export one capture folder
+		var args = new[] { "--export-saz", "captures/20261006-120000" };
+
+		// When: the options are parsed
+		var options = ProxyOptions.Parse(args);
+
+		// Then: the folder is set and no output file was chosen
+		options.ExportSazFolder.ShouldBe("captures/20261006-120000");
+		options.ExportSazOutput.ShouldBeNull();
+	}
+
+	[Fact]
+	public void Parse_ExportSazWithFolderAndFile_SetsBoth() {
+
+		// Given: arguments naming the folder to export and the archive to write, followed by another option
+		var args = new[] { "--export-saz", "run1", "my.saz", "--port", "9000" };
+
+		// When: the options are parsed
+		var options = ProxyOptions.Parse(args);
+
+		// Then: both paths are set and the following option is still understood
+		options.ExportSazFolder.ShouldBe("run1");
+		options.ExportSazOutput.ShouldBe("my.saz");
+		options.Port.ShouldBe(9000);
+	}
+
+	[Fact]
+	public void Parse_SazWithCapture_IsAcceptedAndWithoutCaptureIsRefused() {
+
+		// Given: --saz together with --capture, and --saz on its own
+		var withCapture = new[] { "--capture", "captures", "--saz" };
+		var alone = new[] { "--saz" };
+
+		// When: both are parsed
+		var accepted = ProxyOptions.Parse(withCapture);
+		var refused = () => ProxyOptions.Parse(alone);
+
+		// Then: the first turns on the archive at shutdown, and the second is an error because there would be nothing to pack
+		accepted.SazOnShutdown.ShouldBeTrue();
+		Should.Throw<ArgumentException>(refused);
+	}
+
+	[Fact]
+	public void Parse_ExportSazWithoutAFolder_Throws() {
+
+		// Given: --export-saz followed directly by another option
+		var args = new[] { "--export-saz", "--port", "9000" };
+
+		// When: the options are parsed
+		var parse = () => ProxyOptions.Parse(args);
+
+		// Then: parsing fails, because the folder to export is missing
+		Should.Throw<ArgumentException>(parse);
+	}
+
+	[Fact]
 	public void Parse_NoHttp2Argument_TurnsHttp2OffAndItDefaultsToOn() {
 
 		// Given: no arguments, and separately the --no-http2 argument

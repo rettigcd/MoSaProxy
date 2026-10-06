@@ -46,6 +46,15 @@ public sealed class ProxyOptions {
 	/// <summary>Remove the mos root certificate from the Windows user's trusted roots, then exit (the proxy is not started).</summary>
 	public bool UntrustCa { get; init; }
 
+	/// <summary>Pack an existing capture run folder into a Fiddler .saz archive, then exit (the proxy is not started).</summary>
+	public string? ExportSazFolder { get; init; }
+
+	/// <summary>Where <see cref="ExportSazFolder"/> is written; null means next to the folder, with ".saz" added.</summary>
+	public string? ExportSazOutput { get; init; }
+
+	/// <summary>With capture on, also write this run's folder as a .saz archive when the proxy stops.</summary>
+	public bool SazOnShutdown { get; init; }
+
 	/// <summary>
 	/// Offer HTTP/2 (as well as HTTP/1.1) to clients on intercepted HTTPS connections. On by default;
 	/// <c>--no-http2</c> turns it off, which is useful when debugging a problem that might be HTTP/2 specific.
@@ -69,6 +78,8 @@ public sealed class ProxyOptions {
 		string caDirectory = DefaultCaDirectory;
 		bool untrustCa = false;
 		bool http2 = true;
+		string? exportSazFolder = null, exportSazOutput = null;
+		bool sazOnShutdown = false;
 		for (int i = 0; i < args.Length; i++) {
 			switch (args[i]) {
 				case "--port":
@@ -95,6 +106,14 @@ public sealed class ProxyOptions {
 						throw new ArgumentException("--connect-timeout requires a number of seconds greater than 0 (up to 3600).");
 					connectTimeout = TimeSpan.FromSeconds(seconds);
 					break;
+				case "--export-saz":
+					if (i + 1 >= args.Length || args[i + 1].StartsWith("--")) throw new ArgumentException("--export-saz requires the capture run folder to pack (and optionally the .saz file to write).");
+					exportSazFolder = args[++i];
+					if (i + 1 < args.Length && !args[i + 1].StartsWith("--")) exportSazOutput = args[++i];
+					break;
+				case "--saz":
+					sazOnShutdown = true;
+					break;
 				case "--no-http2":
 					http2 = false;
 					break;
@@ -113,13 +132,15 @@ public sealed class ProxyOptions {
 					caDirectory = args[++i];
 					break;
 				default:
-					throw new ArgumentException($"Unknown argument '{args[i]}'. Usage: mos [--port N] [--log FILE] [--capture DIR] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] [--intercept-bypass HOSTS] [--ca-dir DIR] [--untrust-ca] [--no-http2]");
+					throw new ArgumentException($"Unknown argument '{args[i]}'. Usage: mos [--port N] [--log FILE] [--capture DIR] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] [--intercept-bypass HOSTS] [--ca-dir DIR] [--untrust-ca] [--no-http2] [--saz] [--export-saz RUN_DIR [FILE]]");
 			}
 		}
 		if (bypass.Count > 0 && !intercept) throw new ArgumentException("--intercept-bypass only makes sense together with --intercept.");
+		if (sazOnShutdown && captureDirectory is null) throw new ArgumentException("--saz needs --capture: the archive is made from the captured files.");
 		return new ProxyOptions {
 			Port = port, LogPath = logPath, CaptureDirectory = captureDirectory, CaptureMaxBodyBytes = captureMaxBody,
 			ConnectTimeout = connectTimeout, Intercept = intercept, InterceptBypass = bypass, CaDirectory = caDirectory, UntrustCa = untrustCa, EnableHttp2 = http2,
+			ExportSazFolder = exportSazFolder, ExportSazOutput = exportSazOutput, SazOnShutdown = sazOnShutdown,
 		};
 	}
 }

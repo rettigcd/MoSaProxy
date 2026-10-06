@@ -283,8 +283,20 @@ Original scope for reference:
 - Optional proxy authentication, and access control by client IP. **Dropped:** the listener only accepts loopback
   connections, so there is nobody to authenticate or filter.
 - Request and connection limits, graceful shutdown, log rotation.
-- **`.saz` export:** package a capture run folder (Phase 1b) into a Fiddler-compatible `.saz` file, and verify it
-  opens in Fiddler. Include a command to convert an existing run folder.
+- **`.saz` export *(done, not yet opened in Fiddler)*:** `SazExporter` packs a capture run folder into a `.saz` (a zip).
+  `--export-saz RUN_DIR [FILE]` converts an existing folder (default output: the folder path plus `.saz`), and `--saz`
+  (with `--capture`) writes the archive for the run when the proxy stops.
+  Layout, checked against Telerik's documentation and the `saz2har` reader (which matches `raw/(\d+)_(s|c|m|w)`):
+  `[Content_Types].xml`, `_index.htm` (a readable table of the sessions), and `raw/N_c.txt`, `raw/N_s.txt`, `raw/N_m.xml`
+  and, for WebSockets, `raw/N_w.txt`. The request, response and WebSocket files are copied unchanged; each `N_m.xml` is
+  rewritten from mos's own metadata into Fiddler's `Session` form (`SID`, `BitFlags`, a `SessionTimers` element with
+  Fiddler's twelve timer attributes, and `SessionFlags`).
+  Known limits: (1) the Fiddler `Session` schema is not published, so it is written from the documented timer names and
+  the commonly seen layout, and has not been loaded in Fiddler itself; open an exported `.saz` in Fiddler to confirm.
+  (2) mos only knows when an exchange ended and how long it took, so the request-side timers all equal the start time,
+  the response-side timers all equal the end time, and DNS, connect and TLS timings are 0. (3) `BitFlags` is 0 and
+  `PipeInfo` is omitted. (4) `N_w.txt` is mos's readable layout, not Fiddler's own WebSocket format, so Fiddler may not
+  display the messages. (5) The `_c`/`_s` files are still the Kestrel reconstructions described under Phase 6.
 - Optional inspection UI or log viewer; HAR export.
 - Packaging as a Windows service or a single-file executable.
 
