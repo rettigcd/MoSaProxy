@@ -7,15 +7,15 @@ public class ChromeLauncherTests {
 	const string Chrome = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
 
 	[Fact]
-	public void PowerShellCommand_Built_StartsWithTheCallOperatorAndUsesPowerShellSyntax() {
+	public void PowerShellCommand_IgnoringCertificateErrors_UsesPowerShellSyntaxAndTheIgnoreFlag() {
 
 		// Given: a Chrome path with spaces and a proxy port
 		// (supplied by the constants above)
 
-		// When: the PowerShell command is built
-		var command = ChromeLauncher.PowerShellCommand(Chrome, 8080);
+		// When: the PowerShell command is built for a throwaway profile that ignores certificate errors
+		var command = ChromeLauncher.PowerShellCommand(Chrome, 8080, ignoreCertificateErrors: true);
 
-		// Then: it runs the quoted path with "&", uses $env:TEMP (not %TEMP%), points at the proxy port, and ends with the flag that makes the test profile accept the proxy's certificates
+		// Then: it runs the quoted path with "&", uses $env:TEMP (not %TEMP%), points at the proxy port, and ends with the ignore flag
 		command.ShouldStartWith($"& \"{Chrome}\" ");
 		command.ShouldContain("--user-data-dir=\"$env:TEMP\\chrome-mos\"");
 		command.ShouldNotContain("%TEMP%");
@@ -24,19 +24,47 @@ public class ChromeLauncherTests {
 	}
 
 	[Fact]
-	public void CmdCommand_Built_UsesTheQuotedPathAndPercentTempSyntax() {
+	public void PowerShellCommand_WhenTheRootIsTrusted_HasNoIgnoreFlag() {
+
+		// Given: a Chrome path and a proxy port
+		// (supplied by the constants above)
+
+		// When: the PowerShell command is built for a machine where Windows already trusts the mos root
+		var command = ChromeLauncher.PowerShellCommand(Chrome, 8080, ignoreCertificateErrors: false);
+
+		// Then: the command ends with the proxy setting and does not switch off certificate checking
+		command.ShouldEndWith("--proxy-server=\"http://127.0.0.1:8080\"");
+		command.ShouldNotContain("ignore-certificate-errors");
+	}
+
+	[Fact]
+	public void CmdCommand_IgnoringCertificateErrors_UsesTheQuotedPathPercentTempAndTheIgnoreFlag() {
 
 		// Given: a Chrome path with spaces and a proxy port
 		// (supplied by the constants above)
 
-		// When: the Command Prompt command is built
-		var command = ChromeLauncher.CmdCommand(Chrome, 9090);
+		// When: the Command Prompt command is built for a throwaway profile that ignores certificate errors
+		var command = ChromeLauncher.CmdCommand(Chrome, 9090, ignoreCertificateErrors: true);
 
-		// Then: it starts with the quoted path (no "&"), uses %TEMP%, points at the proxy port, and ends with that same flag
+		// Then: it starts with the quoted path (no "&"), uses %TEMP%, points at the proxy port, and ends with the ignore flag
 		command.ShouldStartWith($"\"{Chrome}\" ");
 		command.ShouldContain("--user-data-dir=\"%TEMP%\\chrome-mos\"");
 		command.ShouldContain("--proxy-server=\"http://127.0.0.1:9090\"");
 		command.ShouldEndWith(" --ignore-certificate-errors");
+	}
+
+	[Fact]
+	public void CmdCommand_WhenTheRootIsTrusted_HasNoIgnoreFlag() {
+
+		// Given: a Chrome path and a proxy port
+		// (supplied by the constants above)
+
+		// When: the Command Prompt command is built for a machine where Windows already trusts the mos root
+		var command = ChromeLauncher.CmdCommand(Chrome, 9090, ignoreCertificateErrors: false);
+
+		// Then: the command ends with the proxy setting and does not switch off certificate checking
+		command.ShouldEndWith("--proxy-server=\"http://127.0.0.1:9090\"");
+		command.ShouldNotContain("ignore-certificate-errors");
 	}
 
 	[Fact]

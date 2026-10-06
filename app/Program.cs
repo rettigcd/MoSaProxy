@@ -7,6 +7,24 @@ catch (ArgumentException ex) {
 	return 1;
 }
 
+if (options.UntrustCa) {
+	if (!OperatingSystem.IsWindows()) {
+		Console.Error.WriteLine("--untrust-ca is only supported on Windows.");
+		return 1;
+	}
+	try {
+		int removed = new RootTrust(new WindowsUserRootStore()).RemoveAll();
+		Console.WriteLine(removed == 0
+			? "No mos root certificate was installed as trusted for your Windows user."
+			: $"Removed {removed} mos root certificate(s) from your Windows user's trusted roots.");
+		return 0;
+	}
+	catch (Exception ex) {
+		Console.Error.WriteLine($"Could not remove the mos root certificate: {ex.Message}");
+		return 1;
+	}
+}
+
 var sinks = new List<IExchangeLog> { new ConsoleExchangeLog() };
 if (options.LogPath is not null) sinks.Add(new JsonLinesExchangeLog(options.LogPath));
 
@@ -14,21 +32,8 @@ await using var proxy = await ProxyHost.StartAsync(options, new CompositeExchang
 Console.WriteLine($"HTTP proxy listening on 127.0.0.1:{proxy.Port}. Press Ctrl+C to stop.");
 if (proxy.CaptureRunDirectory is not null) Console.WriteLine($"Capturing sessions to {proxy.CaptureRunDirectory}");
 if (proxy.Authority is { } authority) {
-	Console.WriteLine();
-	Console.WriteLine("HTTPS interception is ON. Clients must trust the mos root certificate or they will show certificate errors.");
-	Console.WriteLine($"  Root certificate: {authority.RootCertificatePath}");
-	Console.WriteLine("  Keep the folder private: its private key can impersonate any website to a client that trusts it.");
-	string chrome = ChromeLauncher.FindChrome();
-	Console.WriteLine("  Option 1: start a throwaway test Chrome that accepts the proxy's certificates. It ignores ALL certificate errors,");
-	Console.WriteLine("  so use that window only for browsing through this proxy (Chrome shows a warning bar).");
-	Console.WriteLine("  In PowerShell:");
-	Console.WriteLine($"    {ChromeLauncher.PowerShellCommand(chrome, proxy.Port)}");
-	Console.WriteLine("  In Command Prompt:");
-	Console.WriteLine($"    {ChromeLauncher.CmdCommand(chrome, proxy.Port)}");
-	Console.WriteLine("  Option 2: install the root for your Windows user, so every browser really trusts it (a confirmation dialog appears;");
-	Console.WriteLine("  remove it later with: certutil -user -delstore Root \"mos Proxy Root CA (local test CA)\"):");
-	Console.WriteLine($"    certutil -user -addstore Root \"{authority.RootCertificatePath}\"");
-	Console.WriteLine();
+	bool interactive = OperatingSystem.IsWindows() && !Console.IsInputRedirected;
+	InterceptionSetup.Run(authority, proxy.Port, ChromeLauncher.FindChrome(), new RootTrust(new WindowsUserRootStore()), Console.In, Console.Out, interactive);
 }
 await proxy.WaitForShutdownAsync();
 return 0;

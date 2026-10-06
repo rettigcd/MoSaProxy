@@ -200,9 +200,15 @@ the root is stored (default `%LOCALAPPDATA%\mos\ca`, outside the repository).
 - The origin's certificate is validated normally; an untrusted origin certificate gives the client a 502.
 - A client that does not trust the root is detected as a read failure on the decrypted stream right after the
   handshake (TLS 1.3 lets the server finish its side first) and logged as a TLS failure with a hint.
-- Making Chrome trust the proxy: startup prints (1) a command for a throwaway Chrome profile started with
-  `--ignore-certificate-errors` (use that window only for browsing through the proxy), and (2) the `certutil`
-  command for installing the root for the current Windows user, which gives real trust in every browser.
+- Making Chrome trust the proxy: at startup with `--intercept`, mos checks whether its root is in the current Windows
+  user's trusted root store (`RootTrust`, `InterceptionSetup`). If it is, it prints plain Chrome commands (real padlock).
+  If it is not, and the console is interactive, it asks `[y/N]` (default No, no "don't ask again") before installing the
+  public certificate; Windows then shows its own confirmation dialog. If a different mos root (from an earlier CA
+  folder) is installed, it offers to replace it, adding the new root first so a refused dialog never leaves none.
+  If the user declines (or the console is not interactive), it prints commands for a throwaway Chrome profile started
+  with `--ignore-certificate-errors` (use that window only for browsing through the proxy; Chrome marks pages "Not
+  secure"). `--untrust-ca` removes every mos root from the user's trusted roots and exits. The store sits behind
+  `IRootStore`, so tests use a fake and never touch the real store.
 - Lessons learned while getting Chrome to work (so they are not repeated):
   - Chrome's `--ignore-certificate-errors-spki-list` only matches certificates the server actually sends in the
     handshake, and a self-signed root is never sent, so passing the root's hash does nothing. (With the host

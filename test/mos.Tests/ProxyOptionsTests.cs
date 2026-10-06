@@ -105,6 +105,22 @@ public class ProxyOptionsTests {
 	}
 
 	[Fact]
+	public void Parse_UntrustCaArgument_IsSetAndDefaultsToOff() {
+
+		// Given: no arguments, and separately the --untrust-ca argument
+		var none = Array.Empty<string>();
+		var untrust = new[] { "--untrust-ca" };
+
+		// When: both are parsed
+		var defaults = ProxyOptions.Parse(none);
+		var withFlag = ProxyOptions.Parse(untrust);
+
+		// Then: removing the trusted root is off by default and on with the flag
+		defaults.UntrustCa.ShouldBeFalse();
+		withFlag.UntrustCa.ShouldBeTrue();
+	}
+
+	[Fact]
 	public void Parse_InterceptArguments_AreApplied() {
 
 		// Given: arguments that turn interception on, bypass two hosts (one a wildcard), and choose a CA folder

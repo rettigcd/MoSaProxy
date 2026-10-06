@@ -12,6 +12,9 @@ namespace mos;
 /// must stay private and the root must only be trusted on test browsers or profiles.
 /// </summary>
 public sealed class CertificateAuthority {
+	/// <summary>The subject of every mos root certificate. Used to find installed copies of it in a trust store.</summary>
+	public const string RootSubject = "CN=mos Proxy Root CA (local test CA), O=mos";
+
 	const string RootFileName = "mos-root-ca.pfx";
 	const string RootPublicFileName = "mos-root-ca.cer";
 
@@ -60,7 +63,7 @@ public sealed class CertificateAuthority {
 
 	static X509Certificate2 CreateRoot() {
 		using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-		var request = new CertificateRequest("CN=mos Proxy Root CA (local test CA), O=mos", key, HashAlgorithmName.SHA256);
+		var request = new CertificateRequest(RootSubject, key, HashAlgorithmName.SHA256);
 		request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
 		request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
 		request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, false));

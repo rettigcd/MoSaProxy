@@ -37,6 +37,9 @@ public sealed class ProxyOptions {
 	/// <summary>Folder holding the root certificate used for interception.</summary>
 	public string CaDirectory { get; init; } = DefaultCaDirectory;
 
+	/// <summary>Remove the mos root certificate from the Windows user's trusted roots, then exit (the proxy is not started).</summary>
+	public bool UntrustCa { get; init; }
+
 	public static string DefaultCaDirectory =>
 		Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "mos", "ca");
 
@@ -52,6 +55,7 @@ public sealed class ProxyOptions {
 		bool intercept = false;
 		var bypass = new List<string>();
 		string caDirectory = DefaultCaDirectory;
+		bool untrustCa = false;
 		for (int i = 0; i < args.Length; i++) {
 			switch (args[i]) {
 				case "--port":
@@ -78,6 +82,9 @@ public sealed class ProxyOptions {
 						throw new ArgumentException("--connect-timeout requires a number of seconds greater than 0 (up to 3600).");
 					connectTimeout = TimeSpan.FromSeconds(seconds);
 					break;
+				case "--untrust-ca":
+					untrustCa = true;
+					break;
 				case "--intercept":
 					intercept = true;
 					break;
@@ -90,13 +97,13 @@ public sealed class ProxyOptions {
 					caDirectory = args[++i];
 					break;
 				default:
-					throw new ArgumentException($"Unknown argument '{args[i]}'. Usage: mos [--port N] [--log FILE] [--capture DIR] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] [--intercept-bypass HOSTS] [--ca-dir DIR]");
+					throw new ArgumentException($"Unknown argument '{args[i]}'. Usage: mos [--port N] [--log FILE] [--capture DIR] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] [--intercept-bypass HOSTS] [--ca-dir DIR] [--untrust-ca]");
 			}
 		}
 		if (bypass.Count > 0 && !intercept) throw new ArgumentException("--intercept-bypass only makes sense together with --intercept.");
 		return new ProxyOptions {
 			Port = port, LogPath = logPath, CaptureDirectory = captureDirectory, CaptureMaxBodyBytes = captureMaxBody,
-			ConnectTimeout = connectTimeout, Intercept = intercept, InterceptBypass = bypass, CaDirectory = caDirectory,
+			ConnectTimeout = connectTimeout, Intercept = intercept, InterceptBypass = bypass, CaDirectory = caDirectory, UntrustCa = untrustCa,
 		};
 	}
 }
