@@ -1,7 +1,7 @@
-namespace mos;
+namespace MoSaProxy;
 
 /// <summary>
-/// The startup help for HTTPS interception: checks whether the mos root is trusted, offers to install it,
+/// The startup help for HTTPS interception: checks whether the MoSaProxy root is trusted, offers to install it,
 /// and prints the Chrome command that matches the result.
 /// </summary>
 public static class InterceptionSetup {
@@ -29,27 +29,27 @@ public static class InterceptionSetup {
 		if (trusted) {
 			output.WriteLine($"  {Fg.Green}The root is trusted for your Windows user, so browsers accept the proxy's HTTPS certificates.{Fg.Restore} Start Chrome with:");
 			PrintCommands(chromePath, proxyPort, ignoreCertificateErrors: false, output);
-			output.WriteLine("  To remove the trust again, run mos with --untrust-ca (for example: dotnet run --project app -- --untrust-ca).");
+			output.WriteLine("  To remove the trust again, run MoSaProxy with --untrust-ca (for example: dotnet run --project app -- --untrust-ca).");
 		}
 		else {
 			output.WriteLine("  Option 1: start a throwaway test Chrome that accepts the proxy's certificates. It ignores ALL certificate errors,");
 			output.WriteLine("  so use that window only for browsing through this proxy (Chrome shows a warning bar and marks pages \"Not secure\").");
 			PrintCommands(chromePath, proxyPort, ignoreCertificateErrors: true, output);
-			output.WriteLine("  Option 2: restart mos and answer y when asked to trust the root, so every browser accepts it.");
+			output.WriteLine("  Option 2: restart MoSaProxy and answer y when asked to trust the root, so every browser accepts it.");
 		}
 		output.WriteLine("");
 		return trusted;
 	}
 
 	static bool OfferInstall(CertificateAuthority authority, RootTrustState state, RootTrust trust, TextReader input, ColorConsole output) {
-		bool replace = state == RootTrustState.OtherMosRootInstalled;
+		bool replace = state == RootTrustState.OtherMoSaProxyRootInstalled;
 		output.WriteLine("");
 		if (replace) {
-			output.WriteLine($"  {Fg.Yellow}A different mos root certificate (from an earlier CA folder) is installed as trusted, but it does not match this one.{Fg.Restore}");
+			output.WriteLine($"  {Fg.Yellow}A different MoSaProxy root certificate (from an earlier CA folder) is installed as trusted, but it does not match this one.{Fg.Restore}");
 			output.WriteLine("  Replace it with the current one? That would trust the current root, and remove the old one.");
 		}
 		else {
-			output.WriteLine($"  {Fg.Yellow}The mos root certificate is not trusted by this Windows user, so browsers will show certificate errors for HTTPS pages.{Fg.Restore}");
+			output.WriteLine($"  {Fg.Yellow}The MoSaProxy root certificate is not trusted by this Windows user, so browsers will show certificate errors for HTTPS pages.{Fg.Restore}");
 			output.WriteLine("  Trust it for your Windows user? Every app on this account will then trust certificates signed by the key in that folder.");
 		}
 		output.WriteLine("  Windows will show a confirmation dialog.");
@@ -62,7 +62,7 @@ public static class InterceptionSetup {
 		}
 
 		try {
-			trust.Install(authority, replaceOtherMosRoots: replace);
+			trust.Install(authority, replaceOtherMoSaProxyRoots: replace);
 			output.WriteLine($"  {Fg.Green}Installed.{Fg.Restore}");
 			return true;
 		}

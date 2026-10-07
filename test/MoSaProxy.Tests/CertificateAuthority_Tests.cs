@@ -2,9 +2,9 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class CertificateAuthorityTests {
+public class CertificateAuthority_Tests {
 
 	static bool ChainsToRoot(X509Certificate2 certificate, X509Certificate2 root) {
 		using var chain = new X509Chain();

@@ -4,9 +4,9 @@ using System.Xml.Linq;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class SazExporterTests {
+public class SazExporter_Tests {
 
 	static readonly DateTimeOffset Noon = new(2026, 10, 6, 12, 0, 0, TimeSpan.Zero);
 
@@ -104,7 +104,7 @@ public class SazExporterTests {
 		var flags = session.Element("SessionFlags")!.Elements("SessionFlag").ToDictionary(f => f.Attribute("N")!.Value, f => f.Attribute("V")!.Value);
 
 		// Then: it is a Session with its number and bit flags, the twelve named timers (request side at the start, response side at the end),
-		// and flags for the client address and mos's own details
+		// and flags for the client address and MoSaProxy's own details
 		session.Name.LocalName.ShouldBe("Session");
 		session.Attribute("SID")!.Value.ShouldBe("1");
 		session.Attribute("BitFlags")!.Value.ShouldBe("0");
@@ -114,9 +114,9 @@ public class SazExporterTests {
 		DateTimeOffset.Parse(timers.Attribute("ClientBeginRequest")!.Value).ShouldBe(Noon.AddMilliseconds(-250));
 		DateTimeOffset.Parse(timers.Attribute("ClientDoneResponse")!.Value).ShouldBe(Noon);
 		flags["x-clientIP"].ShouldBe("127.0.0.1");
-		flags["x-mos-mode"].ShouldBe("plain");
-		flags["x-mos-client-protocol"].ShouldBe("HTTP/1.1");
-		flags["x-mos-origin-protocol"].ShouldBe("HTTP/1.1");
+		flags["x-mosaproxy-mode"].ShouldBe("plain");
+		flags["x-mosaproxy-client-protocol"].ShouldBe("HTTP/1.1");
+		flags["x-mosaproxy-origin-protocol"].ShouldBe("HTTP/1.1");
 		// no byte-order mark: the file starts with the XML declaration
 		ReadBytes(zip, "raw/1_m.xml")[0].ShouldBe((byte)'<');
 	}
@@ -135,9 +135,9 @@ public class SazExporterTests {
 		var flags = ReadXml(zip, "raw/2_m.xml").Element("SessionFlags")!.Elements("SessionFlag").ToDictionary(f => f.Attribute("N")!.Value, f => f.Attribute("V")!.Value);
 
 		// Then: the counts and mode are recorded
-		flags["x-mos-client-messages"].ShouldBe("1");
-		flags["x-mos-origin-messages"].ShouldBe("0");
-		flags["x-mos-mode"].ShouldBe("websocket-closed");
+		flags["x-mosaproxy-client-messages"].ShouldBe("1");
+		flags["x-mosaproxy-origin-messages"].ShouldBe("0");
+		flags["x-mosaproxy-mode"].ShouldBe("websocket-closed");
 	}
 
 	[Fact]
@@ -283,6 +283,6 @@ public class SazExporterTests {
 		Encoding.Latin1.GetString(ReadBytes(zip, "raw/1_c.txt")).ShouldStartWith($"GET {origin.UrlFor("/page")} HTTP/1.1\r\n");
 		Encoding.Latin1.GetString(ReadBytes(zip, "raw/1_s.txt")).ShouldEndWith("\r\n\r\nfrom the origin");
 		ReadXml(zip, "raw/1_m.xml").Element("SessionFlags")!.Elements("SessionFlag")
-			.Single(f => f.Attribute("N")!.Value == "x-mos-mode").Attribute("V")!.Value.ShouldBe("plain");
+			.Single(f => f.Attribute("N")!.Value == "x-mosaproxy-mode").Attribute("V")!.Value.ShouldBe("plain");
 	}
 }

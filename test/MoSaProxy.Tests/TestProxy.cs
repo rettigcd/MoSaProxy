@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
 public sealed class MemoryExchangeLog : IExchangeLog {
 	readonly List<ExchangeRecord> _records = new();
@@ -22,7 +22,7 @@ public sealed class MemoryExchangeLog : IExchangeLog {
 
 /// <summary>A temporary folder that is deleted when disposed.</summary>
 public sealed class TempFolder : IDisposable {
-	public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"mos-test-{Guid.NewGuid():N}");
+	public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"mosaproxy-test-{Guid.NewGuid():N}");
 
 	public TempFolder() => Directory.CreateDirectory(Path);
 
@@ -55,7 +55,7 @@ public sealed class TestProxy : IAsyncDisposable {
 				AllowAutoRedirect = false,
 				UseCookies = false,
 			};
-			// Like a browser with the mos root installed: accept a certificate only if it names the right host and chains to the mos root.
+			// Like a browser with the MoSaProxy root installed: accept a certificate only if it names the right host and chains to the MoSaProxy root.
 			// Without that trust, certificate errors are left alone so the client behaves like a browser that has not installed it.
 			handler.ServerCertificateCustomValidationCallback = (_, certificate, _, errors) => ValidateServerCertificate(certificate, errors);
 			return new HttpClient(handler) {
@@ -69,7 +69,7 @@ public sealed class TestProxy : IAsyncDisposable {
 	}
 
 	/// <summary>
-	/// Like a browser with the mos root installed: accept a certificate only if it names the right host and chains to the mos root.
+	/// Like a browser with the MoSaProxy root installed: accept a certificate only if it names the right host and chains to the MoSaProxy root.
 	/// Without that trust, certificate errors are left alone so the client behaves like a browser that has not installed it.
 	/// </summary>
 	bool ValidateServerCertificate(X509Certificate2? certificate, SslPolicyErrors errors) {

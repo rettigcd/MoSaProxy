@@ -4,9 +4,9 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class Http2Tests {
+public class Http2_Tests {
 
 	/// <summary>Options for an intercepting proxy that accepts the fake origin's self-signed certificate.</summary>
 	static ProxyOptions Intercepting(TempFolder caFolder, string? captureDirectory = null, bool enableHttp2 = true) => new() {

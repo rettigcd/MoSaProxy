@@ -1,6 +1,6 @@
 using System.Security.Cryptography.X509Certificates;
 
-namespace mos;
+namespace MoSaProxy;
 
 /// <summary>A store of trusted root certificates (on Windows, the current user's "Trusted Root Certification Authorities").</summary>
 public interface IRootStore {
@@ -39,35 +39,35 @@ public sealed class WindowsUserRootStore : IRootStore {
 public enum RootTrustState {
 	/// <summary>This CA's root is installed as a trusted root.</summary>
 	Trusted,
-	/// <summary>No mos root is installed.</summary>
+	/// <summary>No MoSaProxy root is installed.</summary>
 	NotTrusted,
-	/// <summary>A mos root from a different CA folder is installed, but not this one.</summary>
-	OtherMosRootInstalled,
+	/// <summary>A MoSaProxy root from a different CA folder is installed, but not this one.</summary>
+	OtherMoSaProxyRootInstalled,
 }
 
-/// <summary>Checks, installs and removes the mos root certificate in a root store.</summary>
+/// <summary>Checks, installs and removes the MoSaProxy root certificate in a root store.</summary>
 public sealed class RootTrust(IRootStore store) {
 
 	public RootTrustState Check(CertificateAuthority authority) {
 		var installed = store.FindThumbprintsBySubject(CertificateAuthority.RootSubject);
 		if (installed.Any(t => string.Equals(t, authority.Root.Thumbprint, StringComparison.OrdinalIgnoreCase))) return RootTrustState.Trusted;
-		return installed.Count > 0 ? RootTrustState.OtherMosRootInstalled : RootTrustState.NotTrusted;
+		return installed.Count > 0 ? RootTrustState.OtherMoSaProxyRootInstalled : RootTrustState.NotTrusted;
 	}
 
 	/// <summary>
-	/// Installs this CA's root. With <paramref name="replaceOtherMosRoots"/>, mos roots from other CA folders are removed afterwards
+	/// Installs this CA's root. With <paramref name="replaceOtherMoSaProxyRoots"/>, MoSaProxy roots from other CA folders are removed afterwards
 	/// (so a refused confirmation never leaves the user with no root at all).
 	/// </summary>
-	public void Install(CertificateAuthority authority, bool replaceOtherMosRoots) {
+	public void Install(CertificateAuthority authority, bool replaceOtherMoSaProxyRoots) {
 		// Only the public certificate goes into the store; the private key never leaves the CA folder.
 		using var publicOnly = X509CertificateLoader.LoadCertificate(authority.Root.RawData);
 		store.Add(publicOnly);
-		if (!replaceOtherMosRoots) return;
+		if (!replaceOtherMoSaProxyRoots) return;
 		foreach (var thumbprint in store.FindThumbprintsBySubject(CertificateAuthority.RootSubject))
 			if (!string.Equals(thumbprint, authority.Root.Thumbprint, StringComparison.OrdinalIgnoreCase)) store.Remove(thumbprint);
 	}
 
-	/// <summary>Removes every mos root (whatever CA folder it came from). Returns how many were removed.</summary>
+	/// <summary>Removes every MoSaProxy root (whatever CA folder it came from). Returns how many were removed.</summary>
 	public int RemoveAll() {
 		var installed = store.FindThumbprintsBySubject(CertificateAuthority.RootSubject);
 		foreach (var thumbprint in installed) store.Remove(thumbprint);

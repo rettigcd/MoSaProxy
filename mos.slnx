@@ -1,6 +1,0 @@
-<Solution>
-  <Folder Name="/test/">
-    <Project Path="test/mos.Tests/mos.Tests.csproj" />
-  </Folder>
-  <Project Path="app/mos.csproj" />
-</Solution>

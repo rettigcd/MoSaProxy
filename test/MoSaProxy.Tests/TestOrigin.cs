@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
 /// <summary>What the fake origin saw for one request.</summary>
 public sealed record SeenRequest(string Method, string PathAndQuery, IHeaderDictionary Headers, byte[] Body, string ConnectionId, string Protocol);

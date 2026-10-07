@@ -1,6 +1,6 @@
 using System.Net.Sockets;
 
-namespace mos;
+namespace MoSaProxy;
 
 /// <summary>Recognizes the failures that mean the system has run out of something (as opposed to an ordinary error with one request or file).</summary>
 public static class ResourceLimits {

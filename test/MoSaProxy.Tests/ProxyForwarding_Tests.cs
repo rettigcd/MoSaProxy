@@ -3,9 +3,9 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class ProxyForwardingTests {
+public class ProxyForwarding_Tests {
 
 	[Fact]
 	public async Task Get_ThroughProxy_ReturnsOriginResponse() {

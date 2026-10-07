@@ -5,12 +5,12 @@ using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
 
-namespace mos;
+namespace MoSaProxy;
 
 /// <summary>
 /// Packs a capture run folder (N_c.txt, N_s.txt, N_m.xml, N_w.txt per exchange) into a Fiddler Session Archive (.saz): a zip file with
 /// a "raw" folder holding the same numbered files, a [Content_Types].xml, and a human-readable _index.htm.
-/// The request, response and WebSocket files are copied as they are. Each N_m.xml is rewritten from mos's own
+/// The request, response and WebSocket files are copied as they are. Each N_m.xml is rewritten from MoSaProxy's own
 /// metadata into the "Session" form that Fiddler writes.
 /// </summary>
 public static class SazExporter {
@@ -66,7 +66,7 @@ public static class SazExporter {
 		return numbers.Count;
 	}
 
-	// ---- reading mos's own metadata -------------------------------------------------------------------------------
+	// ---- reading MoSaProxy's own metadata -------------------------------------------------------------------------------
 
 	sealed record Exchange(
 		int Number, DateTimeOffset End, double DurationMs, string Client, string Method, string Url, string Host, int Port, string Scheme,
@@ -106,7 +106,7 @@ public static class SazExporter {
 
 	/// <summary>
 	/// Fiddler's per-session metadata: a Session element with the twelve named timers and the session flags.
-	/// mos only knows when an exchange finished and how long it took, so the request-side timers are all the start time and
+	/// MoSaProxy only knows when an exchange finished and how long it took, so the request-side timers are all the start time and
 	/// the response-side timers all the end time; timings Fiddler measures separately (DNS, connect, TLS) are 0.
 	/// </summary>
 	static byte[] FiddlerMetadata(Exchange e) {
@@ -116,13 +116,13 @@ public static class SazExporter {
 		var flags = new List<KeyValuePair<string, string>>();
 		void Flag(string name, string value) { if (value.Length > 0) flags.Add(KeyValuePair.Create(name, value)); }
 		Flag("x-clientIP", e.Client);
-		Flag("x-mos-mode", e.Mode);
-		Flag("x-mos-client-protocol", e.ClientProtocol);
-		Flag("x-mos-origin-protocol", e.OriginProtocol);
-		Flag("x-mos-error", e.Error);
-		Flag("x-mos-client-messages", e.ClientMessages);
-		Flag("x-mos-origin-messages", e.OriginMessages);
-		if (e.Truncated) Flag("x-mos-body-truncated", "true");
+		Flag("x-mosaproxy-mode", e.Mode);
+		Flag("x-mosaproxy-client-protocol", e.ClientProtocol);
+		Flag("x-mosaproxy-origin-protocol", e.OriginProtocol);
+		Flag("x-mosaproxy-error", e.Error);
+		Flag("x-mosaproxy-client-messages", e.ClientMessages);
+		Flag("x-mosaproxy-origin-messages", e.OriginMessages);
+		if (e.Truncated) Flag("x-mosaproxy-body-truncated", "true");
 
 		var session = new XElement("Session",
 			new XAttribute("SID", e.Number),
@@ -146,9 +146,9 @@ public static class SazExporter {
 	static string IndexPage(IReadOnlyList<IndexRow> rows) {
 		string H(string text) => WebUtility.HtmlEncode(text);
 		var page = new StringBuilder();
-		page.Append("<!doctype html><html><head><meta charset=\"utf-8\"><title>mos session archive</title>")
+		page.Append("<!doctype html><html><head><meta charset=\"utf-8\"><title>MoSaProxy session archive</title>")
 			.Append("<style>body{font-family:sans-serif}table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:2px 8px;text-align:left}</style></head><body>")
-			.Append("<h3>mos session archive</h3><table><tr><th>#</th><th>Result</th><th>Protocol</th><th>Host</th><th>URL</th><th>Body</th><th>Mode</th></tr>");
+			.Append("<h3>MoSaProxy session archive</h3><table><tr><th>#</th><th>Result</th><th>Protocol</th><th>Host</th><th>URL</th><th>Body</th><th>Mode</th></tr>");
 		foreach (var row in rows) {
 			var e = row.Exchange;
 			string url = string.IsNullOrEmpty(e.Url) ? row.RequestLine : e.Url;

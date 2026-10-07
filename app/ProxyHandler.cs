@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.WebUtilities;
 
-namespace mos;
+namespace MoSaProxy;
 
 /// <summary>Forwards plain-HTTP proxy requests to their origin, logs each exchange and captures its files.</summary>
 public sealed class ProxyHandler : IDisposable {

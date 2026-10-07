@@ -20,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\app\mos.csproj" />
+    <ProjectReference Include="..\..\app\MoSaProxy.csproj" />
   </ItemGroup>
 
 </Project>

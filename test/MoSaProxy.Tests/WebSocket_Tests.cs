@@ -4,9 +4,9 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class WebSocketTests {
+public class WebSocket_Tests {
 
 	static ProxyOptions Intercepting(TempFolder caFolder, string? captureDirectory = null) => new() {
 		Port = 0,

@@ -1,4 +1,4 @@
-namespace mos;
+namespace MoSaProxy;
 
 public static class HttpVersions {
 	/// <summary>Formats a protocol version the way it is logged and captured: "HTTP/1.0", "HTTP/1.1", "HTTP/2", "HTTP/3".</summary>

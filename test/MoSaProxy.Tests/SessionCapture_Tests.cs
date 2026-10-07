@@ -3,9 +3,9 @@ using System.Xml.Linq;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class SessionCaptureTests {
+public class SessionCapture_Tests {
 
 	static ProxyOptions CaptureTo(TempFolder folder, long? maxBody = null) =>
 		new() { Port = 0, CaptureDirectory = folder.Path, CaptureMaxBodyBytes = maxBody };

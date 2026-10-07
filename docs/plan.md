@@ -1,10 +1,20 @@
-# mos: Traffic-Logging Proxy Plan
+# MoSaProxy: Traffic-Logging Proxy Plan
 
 ## Goal
 
 A forward proxy that logs traffic for both HTTP and HTTPS, and speaks both HTTP/1.1 and HTTP/2.
 Browsers and other clients are pointed at it with a normal proxy setting
 (e.g. Chrome `--proxy-server`).
+
+See also [landscape.md](landscape.md): the other proxy servers, the features they offer, and the save formats wanted.
+
+**Naming.** The project is **MoSaProxy** (it was called "mos" until it was renamed): the solution `MoSaProxy.slnx`, the program
+`app/MoSaProxy.csproj` (`MoSaProxy.exe`), the tests `test/MoSaProxy.Tests`, the `MoSaProxy` namespace, and the `x-mosaproxy-*`
+flags in exported `.saz` files. Three identifiers that exist outside the code deliberately still say "mos", so that the root
+certificate that may already be installed as trusted on a machine keeps being recognized: the certificate's subject
+(`CN=mos Proxy Root CA (local test CA), O=mos`), its file names (`mos-root-ca.pfx` and `.cer`), and its default folder
+(`%LOCALAPPDATA%\mos\ca`). Renaming those needs a migration (see the note in `CertificateAuthority.cs`). The repository
+folder itself is still named `mos` on disk.
 
 ## Where we are
 
@@ -30,7 +40,7 @@ A proxy handles HTTPS through `CONNECT host:443`. After that the traffic is encr
 | **TLS interception (MITM)** | Full URL, headers, bodies, status codes | Needs a local CA that the client trusts. Certificate pinning breaks. |
 
 **Plan:** support both. Blind tunnel is the default and the fallback. Interception is enabled per host or
-globally, and only after the user installs the mos root CA in a test browser profile or OS store. Interception is
+globally, and only after the user installs the MoSaProxy root CA in a test browser profile or OS store. Interception is
 for the user's own traffic and test devices only.
 
 ### 2. HTTP/2
@@ -128,7 +138,7 @@ Design points to settle during Phase 1b:
 
 ## Testing approach
 
-- **Long-term functionality is tested in the test project** (`test/mos.Tests`). When implementing any phase,
+- **Long-term functionality is tested in the test project** (`test/MoSaProxy.Tests`). When implementing any phase,
   add tests there as part of the work and run them with `dotnet test` from the repo root. A phase is not done
   until its tests are in the test project and passing.
 - **Short-term spikes are exempt.** Throwaway experiments (e.g. the Phase 3 Kestrel-vs-`SslStream` spike)
@@ -200,14 +210,14 @@ the root is stored (default `%LOCALAPPDATA%\mos\ca`, outside the repository).
 - The origin's certificate is validated normally; an untrusted origin certificate gives the client a 502.
 - A client that does not trust the root is detected as a read failure on the decrypted stream right after the
   handshake (TLS 1.3 lets the server finish its side first) and logged as a TLS failure with a hint.
-- Making Chrome trust the proxy: at startup with `--intercept`, mos checks whether its root is in the current Windows
+- Making Chrome trust the proxy: at startup with `--intercept`, MoSaProxy checks whether its root is in the current Windows
   user's trusted root store (`RootTrust`, `InterceptionSetup`). If it is, it prints plain Chrome commands (real padlock).
   If it is not, and the console is interactive, it asks `[y/N]` (default No, no "don't ask again") before installing the
-  public certificate; Windows then shows its own confirmation dialog. If a different mos root (from an earlier CA
+  public certificate; Windows then shows its own confirmation dialog. If a different MoSaProxy root (from an earlier CA
   folder) is installed, it offers to replace it, adding the new root first so a refused dialog never leaves none.
   If the user declines (or the console is not interactive), it prints commands for a throwaway Chrome profile started
   with `--ignore-certificate-errors` (use that window only for browsing through the proxy; Chrome marks pages "Not
-  secure"). `--untrust-ca` removes every mos root from the user's trusted roots and exits. The store sits behind
+  secure"). `--untrust-ca` removes every MoSaProxy root from the user's trusted roots and exits. The store sits behind
   `IRootStore`, so tests use a fake and never touch the real store.
 - Lessons learned while getting Chrome to work (so they are not repeated):
   - Chrome's `--ignore-certificate-errors-spki-list` only matches certificates the server actually sends in the
@@ -232,7 +242,7 @@ Original scope for reference:
 - Interception allow/deny list (e.g. never intercept banking sites; fall back to tunnel).
 - Resolve the Kestrel-vs-`SslStream` question from decision 3.
 
-**Done when:** `https://` pages load in a profile that trusts the mos CA, with full URLs and headers logged.
+**Done when:** `https://` pages load in a profile that trusts the MoSaProxy CA, with full URLs and headers logged.
 
 ### Phase 4: HTTP/2 *(done)*
 
@@ -322,13 +332,13 @@ Original scope for reference:
   Layout, checked against Telerik's documentation and the `saz2har` reader (which matches `raw/(\d+)_(s|c|m|w)`):
   `[Content_Types].xml`, `_index.htm` (a readable table of the sessions), and `raw/N_c.txt`, `raw/N_s.txt`, `raw/N_m.xml`
   and, for WebSockets, `raw/N_w.txt`. The request, response and WebSocket files are copied unchanged; each `N_m.xml` is
-  rewritten from mos's own metadata into Fiddler's `Session` form (`SID`, `BitFlags`, a `SessionTimers` element with
+  rewritten from MoSaProxy's own metadata into Fiddler's `Session` form (`SID`, `BitFlags`, a `SessionTimers` element with
   Fiddler's twelve timer attributes, and `SessionFlags`).
   Known limits: (1) the Fiddler `Session` schema is not published, so it is written from the documented timer names and
   the commonly seen layout, and has not been loaded in Fiddler itself; open an exported `.saz` in Fiddler to confirm.
-  (2) mos only knows when an exchange ended and how long it took, so the request-side timers all equal the start time,
+  (2) MoSaProxy only knows when an exchange ended and how long it took, so the request-side timers all equal the start time,
   the response-side timers all equal the end time, and DNS, connect and TLS timings are 0. (3) `BitFlags` is 0 and
-  `PipeInfo` is omitted. (4) `N_w.txt` is mos's readable layout, not Fiddler's own WebSocket format, so Fiddler may not
+  `PipeInfo` is omitted. (4) `N_w.txt` is MoSaProxy's readable layout, not Fiddler's own WebSocket format, so Fiddler may not
   display the messages. (5) The `_c`/`_s` files are still the Kestrel reconstructions described under Phase 6.
 - Optional inspection UI or log viewer; HAR export.
 - Packaging as a Windows service or a single-file executable.

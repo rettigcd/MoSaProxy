@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace mos;
+namespace MoSaProxy;
 
 /// <summary>One request/response pair as seen by the proxy, independent of HTTP version.</summary>
 public sealed record ExchangeRecord {

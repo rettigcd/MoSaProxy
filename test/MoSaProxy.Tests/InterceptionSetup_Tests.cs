@@ -1,8 +1,8 @@
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class InterceptionSetupTests {
+public class InterceptionSetup_Tests {
 
 	const string Chrome = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
 
@@ -130,9 +130,9 @@ public class InterceptionSetupTests {
 	}
 
 	[Fact]
-	public void Run_AnotherMosRootIsInstalledAndUserAgrees_ReplacesItWithTheCurrentRoot() {
+	public void Run_AnotherMoSaProxyRootIsInstalledAndUserAgrees_ReplacesItWithTheCurrentRoot() {
 
-		// Given: an authority, and a store holding an older mos root with a different key, and a user who agrees to replace it
+		// Given: an authority, and a store holding an older MoSaProxy root with a different key, and a user who agrees to replace it
 		using var folder = new TempFolder();
 		var authority = CertificateAuthority.LoadOrCreate(folder.Path);
 		var store = new FakeRootStore();
@@ -148,9 +148,9 @@ public class InterceptionSetupTests {
 	}
 
 	[Fact]
-	public void Run_AnotherMosRootIsInstalledAndUserDeclines_LeavesTheOldRootInPlace() {
+	public void Run_AnotherMoSaProxyRootIsInstalledAndUserDeclines_LeavesTheOldRootInPlace() {
 
-		// Given: an authority, a store holding an older mos root, and a user who declines to replace it
+		// Given: an authority, a store holding an older MoSaProxy root, and a user who declines to replace it
 		using var folder = new TempFolder();
 		var authority = CertificateAuthority.LoadOrCreate(folder.Path);
 		var store = new FakeRootStore();

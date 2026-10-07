@@ -3,9 +3,9 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class TunnelTests {
+public class Tunnel_Tests {
 
 	const string Established = "HTTP/1.1 200 Connection Established\r\n\r\n";
 

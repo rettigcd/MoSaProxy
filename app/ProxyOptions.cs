@@ -1,5 +1,9 @@
-namespace mos;
+namespace MoSaProxy;
 
+/// <summary>
+/// The settings the proxy runs with, and their defaults. Turning command-line arguments into these settings is
+/// <see cref="ProxyOptionsParser"/>'s job, so this class holds no user-interface text.
+/// </summary>
 public sealed class ProxyOptions {
 
 	/// <summary>Port to listen on (loopback only). 0 picks any free port.</summary>
@@ -58,7 +62,7 @@ public sealed class ProxyOptions {
 	/// <summary>Folder holding the root certificate used for interception.</summary>
 	public string CaDirectory { get; init; } = DefaultCaDirectory;
 
-	/// <summary>Remove the mos root certificate from the Windows user's trusted roots, then exit (the proxy is not started).</summary>
+	/// <summary>Remove the MoSaProxy root certificate from the Windows user's trusted roots, then exit (the proxy is not started).</summary>
 	public bool UntrustCa { get; init; }
 
 	/// <summary>Pack an existing capture run folder into a Fiddler .saz archive, then exit (the proxy is not started).</summary>
@@ -76,108 +80,10 @@ public sealed class ProxyOptions {
 	/// </summary>
 	public bool EnableHttp2 { get; init; } = true;
 
+	/// <summary>Still "mos" (from before the rename to MoSaProxy) so an existing CA folder keeps being found; see the naming note in CertificateAuthority.</summary>
 	public static string DefaultCaDirectory =>
 		Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "mos", "ca");
 
 	/// <summary>Replaces the normal check of an origin server's certificate. Meant for tests; null means normal validation.</summary>
 	public System.Net.Security.RemoteCertificateValidationCallback? OriginCertificateValidation { get; init; }
-
-	public static ProxyOptions Parse(string[] args) {
-		int port = 8080;
-		string? logPath = null;
-		string? captureDirectory = null;
-		long? captureMaxBody = null;
-		var connectTimeout = DefaultConnectTimeout;
-		bool intercept = false;
-		var bypass = new List<string>();
-		string caDirectory = DefaultCaDirectory;
-		bool untrustCa = false;
-		bool http2 = true;
-		long logMaxBytes = 50L * 1024 * 1024;
-		int logKeep = 5;
-		var drainTimeout = TimeSpan.FromSeconds(10);
-		string? exportSazFolder = null, exportSazOutput = null;
-		bool sazOnShutdown = false;
-		for (int i = 0; i < args.Length; i++) {
-			switch (args[i]) {
-				case "--port":
-					if (i + 1 >= args.Length || !int.TryParse(args[++i], out port) || port < 0 || port > 65535)
-						throw new ArgumentException("--port requires a number from 0 to 65535.");
-					break;
-				case "--log":
-					if (i + 1 >= args.Length) throw new ArgumentException("--log requires a file path.");
-					logPath = args[++i];
-					break;
-				case "--capture":
-					if (i + 1 >= args.Length) throw new ArgumentException("--capture requires a folder path.");
-					captureDirectory = args[++i];
-					break;
-				case "--capture-max-body":
-					if (i + 1 >= args.Length || !long.TryParse(args[++i], out long max) || max < 0)
-						throw new ArgumentException("--capture-max-body requires a number of bytes (0 or more).");
-					captureMaxBody = max;
-					break;
-				case "--connect-timeout":
-					if (i + 1 >= args.Length
-						|| !double.TryParse(args[++i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double seconds)
-						|| seconds <= 0 || seconds > 3600)
-						throw new ArgumentException("--connect-timeout requires a number of seconds greater than 0 (up to 3600).");
-					connectTimeout = TimeSpan.FromSeconds(seconds);
-					break;
-				case "--export-saz":
-					if (i + 1 >= args.Length || args[i + 1].StartsWith("--")) throw new ArgumentException("--export-saz requires the capture run folder to pack (and optionally the .saz file to write).");
-					exportSazFolder = args[++i];
-					if (i + 1 < args.Length && !args[i + 1].StartsWith("--")) exportSazOutput = args[++i];
-					break;
-				case "--saz":
-					sazOnShutdown = true;
-					break;
-				case "--log-max-mb":
-					if (i + 1 >= args.Length
-						|| !double.TryParse(args[++i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double megabytes)
-						|| megabytes < 0 || megabytes > 1_000_000)
-						throw new ArgumentException("--log-max-mb requires a number of megabytes (0 means never rotate).");
-					logMaxBytes = (long)(megabytes * 1024 * 1024);
-					break;
-				case "--log-keep":
-					if (i + 1 >= args.Length || !int.TryParse(args[++i], out logKeep) || logKeep < 0 || logKeep > 1000)
-						throw new ArgumentException("--log-keep requires a number from 0 to 1000.");
-					break;
-				case "--drain-timeout":
-					if (i + 1 >= args.Length
-						|| !double.TryParse(args[++i], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double drainSeconds)
-						|| drainSeconds < 0 || drainSeconds > 3600)
-						throw new ArgumentException("--drain-timeout requires a number of seconds from 0 to 3600 (0 stops at once).");
-					drainTimeout = TimeSpan.FromSeconds(drainSeconds);
-					break;
-				case "--no-http2":
-					http2 = false;
-					break;
-				case "--untrust-ca":
-					untrustCa = true;
-					break;
-				case "--intercept":
-					intercept = true;
-					break;
-				case "--intercept-bypass":
-					if (i + 1 >= args.Length) throw new ArgumentException("--intercept-bypass requires a comma-separated list of hosts.");
-					bypass.AddRange(args[++i].Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries));
-					break;
-				case "--ca-dir":
-					if (i + 1 >= args.Length) throw new ArgumentException("--ca-dir requires a folder path.");
-					caDirectory = args[++i];
-					break;
-				default:
-					throw new ArgumentException($"Unknown argument '{args[i]}'. Usage: mos [--port N] [--log FILE] [--capture DIR] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] [--intercept-bypass HOSTS] [--ca-dir DIR] [--untrust-ca] [--no-http2] [--saz] [--export-saz RUN_DIR [FILE]] [--log-max-mb N] [--log-keep N] [--drain-timeout SECONDS]");
-			}
-		}
-		if (bypass.Count > 0 && !intercept) throw new ArgumentException("--intercept-bypass only makes sense together with --intercept.");
-		if (sazOnShutdown && captureDirectory is null) throw new ArgumentException("--saz needs --capture: the archive is made from the captured files.");
-		return new ProxyOptions {
-			Port = port, LogPath = logPath, CaptureDirectory = captureDirectory, CaptureMaxBodyBytes = captureMaxBody,
-			ConnectTimeout = connectTimeout, Intercept = intercept, InterceptBypass = bypass, CaDirectory = caDirectory, UntrustCa = untrustCa, EnableHttp2 = http2,
-			ExportSazFolder = exportSazFolder, ExportSazOutput = exportSazOutput, SazOnShutdown = sazOnShutdown,
-			LogMaxBytes = logMaxBytes, LogKeep = logKeep, DrainTimeout = drainTimeout,
-		};
-	}
 }

@@ -2,12 +2,13 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
 /// <summary>A raw TCP client for talking to the proxy byte by byte, as a browser would for a CONNECT tunnel.</summary>
 public sealed class RawClient : IDisposable {
 	readonly TcpClient _tcp = new();
 	NetworkStream _stream = null!;
+	byte[] _pending = Array.Empty<byte>();   // bytes already received but not yet asked for (a read can run past what the caller wanted)
 
 	public static async Task<RawClient> ConnectAsync(int port) {
 		var client = new RawClient();
@@ -22,17 +23,36 @@ public sealed class RawClient : IDisposable {
 	/// <summary>Tells the other side we will send no more data, while still being able to read.</summary>
 	public void FinishSending() => _tcp.Client.Shutdown(SocketShutdown.Send);
 
-	/// <summary>Reads until the given text has been received (and returns everything read so far).</summary>
+	/// <summary>Reads from what was received earlier first, then from the connection.</summary>
+	async Task<int> ReadSomeAsync(Memory<byte> buffer, CancellationToken cancellationToken) {
+		if (_pending.Length == 0) return await _stream.ReadAsync(buffer, cancellationToken);
+		int n = Math.Min(buffer.Length, _pending.Length);
+		_pending.AsMemory(0, n).CopyTo(buffer);
+		_pending = _pending[n..];
+		return n;
+	}
+
+	/// <summary>
+	/// Reads until the given text has been received and returns everything up to and including it. Anything that arrived
+	/// after it (the next bytes can share a network read with it) is kept for the next read instead of being lost.
+	/// If the connection ends first, returns what was received.
+	/// </summary>
 	public async Task<string> ReadUntilAsync(string marker, int timeoutSeconds = 10) {
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
-		var received = new StringBuilder();
+		var received = new List<byte>();
 		var buffer = new byte[4096];
-		while (!received.ToString().Contains(marker)) {
-			int n = await _stream.ReadAsync(buffer, cts.Token);
-			if (n == 0) break;
-			received.Append(Encoding.Latin1.GetString(buffer, 0, n));
+		while (true) {
+			string text = Encoding.Latin1.GetString(received.ToArray());
+			int at = text.IndexOf(marker, StringComparison.Ordinal);
+			if (at >= 0) {
+				int end = at + marker.Length;
+				_pending = received.Skip(end).Concat(_pending).ToArray();
+				return text[..end];
+			}
+			int n = await ReadSomeAsync(buffer, cts.Token);
+			if (n == 0) return text;
+			received.AddRange(buffer.AsSpan(0, n).ToArray());
 		}
-		return received.ToString();
 	}
 
 	/// <summary>Reads exactly <paramref name="count"/> bytes (fewer only if the connection closes first).</summary>
@@ -41,7 +61,7 @@ public sealed class RawClient : IDisposable {
 		var buffer = new byte[count];
 		int total = 0;
 		while (total < count) {
-			int n = await _stream.ReadAsync(buffer.AsMemory(total), cts.Token);
+			int n = await ReadSomeAsync(buffer.AsMemory(total), cts.Token);
 			if (n == 0) break;
 			total += n;
 		}
@@ -52,6 +72,8 @@ public sealed class RawClient : IDisposable {
 	public async Task<byte[]> ReadToEndAsync(int timeoutSeconds = 10) {
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
 		using var all = new MemoryStream();
+		all.Write(_pending);
+		_pending = Array.Empty<byte>();
 		await _stream.CopyToAsync(all, cts.Token);
 		return all.ToArray();
 	}

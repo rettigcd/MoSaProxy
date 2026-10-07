@@ -1,7 +1,7 @@
-using mos;
+using MoSaProxy;
 
 ProxyOptions options;
-try { options = ProxyOptions.Parse(args); }
+try { options = ProxyOptionsParser.Parse(args); }
 catch (ArgumentException ex) {
 	Console.Error.WriteLine(ex.Message);
 	return 1;
@@ -15,12 +15,12 @@ if (options.UntrustCa) {
 	try {
 		int removed = new RootTrust(new WindowsUserRootStore()).RemoveAll();
 		Console.WriteLine(removed == 0
-			? "No mos root certificate was installed as trusted for your Windows user."
-			: $"Removed {removed} mos root certificate(s) from your Windows user's trusted roots.");
+			? "No MoSaProxy root certificate was installed as trusted for your Windows user."
+			: $"Removed {removed} MoSaProxy root certificate(s) from your Windows user's trusted roots.");
 		return 0;
 	}
 	catch (Exception ex) {
-		Console.Error.WriteLine($"Could not remove the mos root certificate: {ex.Message}");
+		Console.Error.WriteLine($"Could not remove the MoSaProxy root certificate: {ex.Message}");
 		return 1;
 	}
 }

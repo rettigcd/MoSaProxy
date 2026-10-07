@@ -1,6 +1,6 @@
 using System.Net.Sockets;
 
-namespace mos;
+namespace MoSaProxy;
 
 /// <summary>Opens the connection for a CONNECT request and relays bytes in both directions.</summary>
 public static class TunnelRelay {

@@ -1,4 +1,4 @@
-namespace mos;
+namespace MoSaProxy;
 
 /// <summary>Wraps a stream and counts the bytes read from and written to it.</summary>
 public sealed class CountingStream(Stream inner) : Stream {

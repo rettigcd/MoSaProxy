@@ -1,8 +1,91 @@
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class ProxyOptionsTests {
+public class ProxyOptionsParser_Tests {
+
+	[Fact]
+	public void Parse_NoArguments_GivesTheSameSettingsAsAFreshProxyOptions() {
+
+		// Given: no command-line arguments, and a ProxyOptions created directly (which holds the one definition of every default)
+		var args = Array.Empty<string>();
+		var fresh = new ProxyOptions();
+
+		// When: the options are parsed
+		var parsed = ProxyOptionsParser.Parse(args);
+
+		// Then: every setting equals the default declared in ProxyOptions, so the parser has no defaults of its own that could drift
+		static string Describe(object? value) => value is IEnumerable<string> list ? "[" + string.Join(", ", list) + "]" : value?.ToString() ?? "null";
+		var differences = new List<string>();
+		foreach (var property in typeof(ProxyOptions).GetProperties()) {
+			string fromParser = Describe(property.GetValue(parsed));
+			string declared = Describe(property.GetValue(fresh));
+			if (fromParser != declared) differences.Add($"{property.Name}: the parser gave {fromParser}, ProxyOptions declares {declared}");
+		}
+		differences.ShouldBeEmpty();
+	}
+
+	[Fact]
+	public void Parse_UnknownArgument_ErrorNamesItAndShowsTheUsage() {
+
+		// Given: an argument the program does not have
+		var args = new[] { "--bogus" };
+
+		// When: the options are parsed
+		var parse = () => { ProxyOptionsParser.Parse(args); };
+
+		// Then: the error names the argument and ends with the usage line
+		var message = Should.Throw<ArgumentException>(parse).Message;
+		message.ShouldStartWith("Unknown argument '--bogus'.");
+		message.ShouldEndWith(ProxyOptionsParser.Usage);
+		ProxyOptionsParser.Usage.ShouldStartWith("Usage: MoSaProxy");
+	}
+
+	[Theory]
+	[InlineData("--port")]
+	[InlineData("--log")]
+	[InlineData("--capture")]
+	[InlineData("--capture-max-body")]
+	[InlineData("--connect-timeout")]
+	[InlineData("--intercept")]
+	[InlineData("--intercept-bypass")]
+	[InlineData("--ca-dir")]
+	[InlineData("--untrust-ca")]
+	[InlineData("--no-http2")]
+	[InlineData("--saz")]
+	[InlineData("--export-saz")]
+	[InlineData("--log-max-mb")]
+	[InlineData("--log-keep")]
+	[InlineData("--drain-timeout")]
+	public void Usage_MentionsEveryOptionTheParserAccepts(string option) {
+
+		// Given: an option the parser accepts (supplied by the test data)
+
+		// When: the usage line is read
+		var usage = ProxyOptionsParser.Usage;
+
+		// Then: it mentions the option, so the help cannot silently fall behind the options
+		usage.ShouldContain(option);
+	}
+
+	[Fact]
+	public void Parse_DecimalNumbers_AreReadWithADotWhateverTheRegionalSettings() {
+
+		// Given: a machine set to German regional settings (where "2.5" would otherwise be read as 25) and an argument of 2.5 megabytes
+		var original = System.Globalization.CultureInfo.CurrentCulture;
+		System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+
+		try {
+			// When: the options are parsed
+			var options = ProxyOptionsParser.Parse(new[] { "--log-max-mb", "2.5" });
+
+			// Then: it is 2.5 megabytes
+			options.LogMaxBytes.ShouldBe(2_621_440);
+		}
+		finally {
+			System.Globalization.CultureInfo.CurrentCulture = original;
+		}
+	}
 
 	[Fact]
 	public void Parse_NoArguments_UsesDefaults() {
@@ -11,7 +94,7 @@ public class ProxyOptionsTests {
 		var args = Array.Empty<string>();
 
 		// When: the options are parsed
-		var options = ProxyOptions.Parse(args);
+		var options = ProxyOptionsParser.Parse(args);
 
 		// Then: the port is 8080 and there is no log file
 		options.Port.ShouldBe(8080);
@@ -25,7 +108,7 @@ public class ProxyOptionsTests {
 		var args = new[] { "--port", "9000", "--log", "traffic.jsonl" };
 
 		// When: the options are parsed
-		var options = ProxyOptions.Parse(args);
+		var options = ProxyOptionsParser.Parse(args);
 
 		// Then: the options carry that port and path
 		options.Port.ShouldBe(9000);
@@ -39,7 +122,7 @@ public class ProxyOptionsTests {
 		var args = new[] { "--capture", "captures", "--capture-max-body", "1000" };
 
 		// When: the options are parsed
-		var options = ProxyOptions.Parse(args);
+		var options = ProxyOptionsParser.Parse(args);
 
 		// Then: the options carry the folder and the cap
 		options.CaptureDirectory.ShouldBe("captures");
@@ -53,7 +136,7 @@ public class ProxyOptionsTests {
 		var args = Array.Empty<string>();
 
 		// When: the options are parsed
-		var options = ProxyOptions.Parse(args);
+		var options = ProxyOptionsParser.Parse(args);
 
 		// Then: capture is off and there is no body cap
 		options.CaptureDirectory.ShouldBeNull();
@@ -67,7 +150,7 @@ public class ProxyOptionsTests {
 		var args = Array.Empty<string>();
 
 		// When: the options are parsed
-		var options = ProxyOptions.Parse(args);
+		var options = ProxyOptionsParser.Parse(args);
 
 		// Then: the tunnel connect timeout is 15 seconds
 		options.ConnectTimeout.ShouldBe(TimeSpan.FromSeconds(15));
@@ -83,7 +166,7 @@ public class ProxyOptionsTests {
 		var args = new[] { "--connect-timeout", value };
 
 		// When: the options are parsed
-		var options = ProxyOptions.Parse(args);
+		var options = ProxyOptionsParser.Parse(args);
 
 		// Then: the connect timeout is that many seconds
 		options.ConnectTimeout.ShouldBe(TimeSpan.FromSeconds(expectedSeconds));
@@ -96,7 +179,7 @@ public class ProxyOptionsTests {
 		var args = Array.Empty<string>();
 
 		// When: the options are parsed
-		var options = ProxyOptions.Parse(args);
+		var options = ProxyOptionsParser.Parse(args);
 
 		// Then: HTTPS interception is off, nothing is bypassed, and the CA folder is the default one in the user's profile
 		options.Intercept.ShouldBeFalse();
@@ -111,7 +194,7 @@ public class ProxyOptionsTests {
 		var args = new[] { "--export-saz", "captures/20261006-120000" };
 
 		// When: the options are parsed
-		var options = ProxyOptions.Parse(args);
+		var options = ProxyOptionsParser.Parse(args);
 
 		// Then: the folder is set and no output file was chosen
 		options.ExportSazFolder.ShouldBe("captures/20261006-120000");
@@ -125,7 +208,7 @@ public class ProxyOptionsTests {
 		var args = new[] { "--export-saz", "run1", "my.saz", "--port", "9000" };
 
 		// When: the options are parsed
-		var options = ProxyOptions.Parse(args);
+		var options = ProxyOptionsParser.Parse(args);
 
 		// Then: both paths are set and the following option is still understood
 		options.ExportSazFolder.ShouldBe("run1");
@@ -141,8 +224,8 @@ public class ProxyOptionsTests {
 		var alone = new[] { "--saz" };
 
 		// When: both are parsed
-		var accepted = ProxyOptions.Parse(withCapture);
-		var refused = () => ProxyOptions.Parse(alone);
+		var accepted = ProxyOptionsParser.Parse(withCapture);
+		var refused = () => ProxyOptionsParser.Parse(alone);
 
 		// Then: the first turns on the archive at shutdown, and the second is an error because there would be nothing to pack
 		accepted.SazOnShutdown.ShouldBeTrue();
@@ -156,7 +239,7 @@ public class ProxyOptionsTests {
 		var args = new[] { "--export-saz", "--port", "9000" };
 
 		// When: the options are parsed
-		var parse = () => ProxyOptions.Parse(args);
+		var parse = () => ProxyOptionsParser.Parse(args);
 
 		// Then: parsing fails, because the folder to export is missing
 		Should.Throw<ArgumentException>(parse);
@@ -169,7 +252,7 @@ public class ProxyOptionsTests {
 		var args = Array.Empty<string>();
 
 		// When: the options are parsed
-		var options = ProxyOptions.Parse(args);
+		var options = ProxyOptionsParser.Parse(args);
 
 		// Then: the log rotates at 50 MB keeping 5 files, and stopping waits up to 10 seconds
 		options.LogMaxBytes.ShouldBe(50L * 1024 * 1024);
@@ -184,7 +267,7 @@ public class ProxyOptionsTests {
 		var args = new[] { "--log-max-mb", "2.5", "--log-keep", "3", "--drain-timeout", "4.5" };
 
 		// When: the options are parsed
-		var options = ProxyOptions.Parse(args);
+		var options = ProxyOptionsParser.Parse(args);
 
 		// Then: the values are used (2.5 MB is 2,621,440 bytes)
 		options.LogMaxBytes.ShouldBe(2_621_440);
@@ -199,7 +282,7 @@ public class ProxyOptionsTests {
 		var args = new[] { "--log-max-mb", "0", "--log-keep", "0", "--drain-timeout", "0" };
 
 		// When: the options are parsed
-		var options = ProxyOptions.Parse(args);
+		var options = ProxyOptionsParser.Parse(args);
 
 		// Then: all three are accepted as zero
 		options.LogMaxBytes.ShouldBe(0);
@@ -224,7 +307,7 @@ public class ProxyOptionsTests {
 		// Given: a missing, negative, non-numeric or out-of-range value (supplied by the test data)
 
 		// When: the options are parsed
-		var parse = () => ProxyOptions.Parse(args);
+		var parse = () => ProxyOptionsParser.Parse(args);
 
 		// Then: parsing fails with an ArgumentException
 		Should.Throw<ArgumentException>(parse);
@@ -238,8 +321,8 @@ public class ProxyOptionsTests {
 		var off = new[] { "--no-http2" };
 
 		// When: both are parsed
-		var defaults = ProxyOptions.Parse(none);
-		var withFlag = ProxyOptions.Parse(off);
+		var defaults = ProxyOptionsParser.Parse(none);
+		var withFlag = ProxyOptionsParser.Parse(off);
 
 		// Then: HTTP/2 is offered by default and not offered with the flag
 		defaults.EnableHttp2.ShouldBeTrue();
@@ -254,8 +337,8 @@ public class ProxyOptionsTests {
 		var untrust = new[] { "--untrust-ca" };
 
 		// When: both are parsed
-		var defaults = ProxyOptions.Parse(none);
-		var withFlag = ProxyOptions.Parse(untrust);
+		var defaults = ProxyOptionsParser.Parse(none);
+		var withFlag = ProxyOptionsParser.Parse(untrust);
 
 		// Then: removing the trusted root is off by default and on with the flag
 		defaults.UntrustCa.ShouldBeFalse();
@@ -269,7 +352,7 @@ public class ProxyOptionsTests {
 		var args = new[] { "--intercept", "--intercept-bypass", "bank.example, *.secure.example", "--ca-dir", "my-ca" };
 
 		// When: the options are parsed
-		var options = ProxyOptions.Parse(args);
+		var options = ProxyOptionsParser.Parse(args);
 
 		// Then: interception is on, the bypass list holds both hosts (trimmed), and the CA folder is the chosen one
 		options.Intercept.ShouldBeTrue();
@@ -287,7 +370,7 @@ public class ProxyOptionsTests {
 		// (supplied by the test data)
 
 		// When: the options are parsed
-		var parse = () => ProxyOptions.Parse(args);
+		var parse = () => ProxyOptionsParser.Parse(args);
 
 		// Then: parsing fails with an ArgumentException
 		Should.Throw<ArgumentException>(parse);
@@ -305,7 +388,7 @@ public class ProxyOptionsTests {
 		// (supplied by the test data)
 
 		// When: the options are parsed
-		var parse = () => ProxyOptions.Parse(args);
+		var parse = () => ProxyOptionsParser.Parse(args);
 
 		// Then: parsing fails with an ArgumentException
 		Should.Throw<ArgumentException>(parse);
@@ -327,7 +410,7 @@ public class ProxyOptionsTests {
 		// (supplied by the test data)
 
 		// When: the options are parsed
-		var parse = () => ProxyOptions.Parse(args);
+		var parse = () => ProxyOptionsParser.Parse(args);
 
 		// Then: parsing fails with an ArgumentException
 		Should.Throw<ArgumentException>(parse);

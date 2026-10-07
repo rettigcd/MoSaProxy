@@ -3,9 +3,9 @@ using System.Net.Sockets;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class ResourceLimitTests {
+public class ResourceLimit_Tests {
 
 	static IOException DiskFull() => new("There is not enough space on the disk.", unchecked((int)0x80070070));
 

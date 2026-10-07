@@ -1,9 +1,9 @@
 using System.Text.Json;
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class LogRotationTests {
+public class LogRotation_Tests {
 
 	static ExchangeRecord Record(int number) => new() { Method = "GET", Url = $"http://a.test/{number}", Status = 200 };
 

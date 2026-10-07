@@ -2,10 +2,10 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
 /// <summary>With interception on, a CONNECT tunnel is not always TLS. These tests cover how the proxy tells the cases apart.</summary>
-public class TunnelSniffingTests {
+public class TunnelSniffing_Tests {
 
 	static ProxyOptions Intercepting(TempFolder caFolder, TimeSpan? sniffTimeout = null) => new() {
 		Port = 0,

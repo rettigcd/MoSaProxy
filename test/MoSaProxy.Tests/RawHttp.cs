@@ -1,7 +1,7 @@
 using System.Net.Sockets;
 using System.Text;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
 public static class RawHttp {
 	/// <summary>Sends literal request text to a loopback port and returns everything the server answers until it closes.</summary>

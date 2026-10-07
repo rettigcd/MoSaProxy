@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace mos;
+namespace MoSaProxy;
 
 /// <summary>
 /// Writes text with colours, one whole message at a time (so messages from different threads never mix).

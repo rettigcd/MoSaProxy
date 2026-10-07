@@ -3,7 +3,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
-namespace mos;
+namespace MoSaProxy;
 
 /// <summary>
 /// A local root certificate authority used to issue per-host certificates for TLS interception.
@@ -12,7 +12,14 @@ namespace mos;
 /// must stay private and the root must only be trusted on test browsers or profiles.
 /// </summary>
 public sealed class CertificateAuthority {
-	/// <summary>The subject of every mos root certificate. Used to find installed copies of it in a trust store.</summary>
+	// NAMING: the project was called "mos" before it was renamed MoSaProxy. The root certificate's subject, its two file names and
+	// its default folder (see ProxyOptions.DefaultCaDirectory) still say "mos" on purpose. They exist outside the code: a root
+	// certificate with exactly this subject may already be installed as trusted on a machine, and the files and folder may already
+	// hold its private key. Renaming any of them would make an installed root look like a stranger (it would no longer be found by
+	// subject, so trust would be offered again and --untrust-ca would miss the old one) and would orphan the existing CA files.
+	// Change them only together with a migration.
+
+	/// <summary>The subject of every MoSaProxy root certificate. Used to find installed copies of it in a trust store. See the naming note above.</summary>
 	public const string RootSubject = "CN=mos Proxy Root CA (local test CA), O=mos";
 
 	const string RootFileName = "mos-root-ca.pfx";
@@ -74,7 +81,7 @@ public sealed class CertificateAuthority {
 
 	X509Certificate2 CreateLeaf(string host) {
 		using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-		string commonName = host.Length <= 60 ? host : "mos-generated";
+		string commonName = host.Length <= 60 ? host : "mosaproxy-generated";
 		var request = new CertificateRequest($"CN={commonName}", key, HashAlgorithmName.SHA256);
 
 		var names = new SubjectAlternativeNameBuilder();

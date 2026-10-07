@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Http;
 
-namespace mos;
+namespace MoSaProxy;
 
 public static class HeaderRules {
 

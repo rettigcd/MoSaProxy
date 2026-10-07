@@ -11,7 +11,7 @@ using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 
-namespace mos;
+namespace MoSaProxy;
 
 /// <summary>
 /// Handles HTTPS-style tunnels (HTTP/1.1 CONNECT) at the connection level. Kestrel cannot upgrade a CONNECT
@@ -30,7 +30,7 @@ public sealed class TunnelHandler(
 	ProxyActivity activity, ResourceLimitMonitor limits, CertificateAuthority? authority = null) {
 
 	/// <summary>Key in the connection's Items holding the https:// base URI of an intercepted connection.</summary>
-	public const string InterceptTargetKey = "mos.intercept-target";
+	public const string InterceptTargetKey = "MoSaProxy.intercept-target";
 
 	const int MaxHeadBytes = 64 * 1024;
 	static readonly byte[] ConnectPrefix = Encoding.ASCII.GetBytes("CONNECT ");
@@ -296,7 +296,7 @@ public sealed class TunnelHandler(
 		connection.Features.Set<ITlsConnectionFeature>(new TlsConnectionFeature());
 		connection.Features.Set<ITlsApplicationProtocolFeature>(new TlsApplicationProtocolFeature(tls.NegotiatedApplicationProtocol.Protocol));
 		// With TLS 1.3 the server can finish its side of the handshake before the client has accepted the certificate,
-		// so a client that does not trust the mos root only shows up as an error on the first read. Watch for that.
+		// so a client that does not trust the MoSaProxy root only shows up as an error on the first read. Watch for that.
 		var observed = new ObservedStream(tls);
 		connection.Transport = new DuplexPipe(PipeReader.Create(observed), PipeWriter.Create(observed));
 		await next(connection);
@@ -305,7 +305,7 @@ public sealed class TunnelHandler(
 	}
 
 	void LogTlsFailure(ConnectionContext connection, string host, int port, Exception ex) =>
-		// Usually the client does not trust the mos root certificate (or pins the site's certificate).
+		// Usually the client does not trust the MoSaProxy root certificate (or pins the site's certificate).
 		log.Write(new ExchangeRecord {
 			Timestamp = DateTimeOffset.UtcNow,
 			Client = (connection.RemoteEndPoint as IPEndPoint)?.Address.ToString() ?? "",
@@ -315,7 +315,7 @@ public sealed class TunnelHandler(
 			Url = $"{host}:{port}",
 			ClientHttpVersion = "HTTP/1.1",
 			Mode = "rejected",
-			Error = $"TLS handshake with client failed (does it trust the mos root CA?): {ex.GetType().Name}: {ex.InnerException?.Message ?? ex.Message}",
+			Error = $"TLS handshake with client failed (does it trust the MoSaProxy root CA?): {ex.GetType().Name}: {ex.InnerException?.Message ?? ex.Message}",
 		});
 
 	/// <summary>The name to issue a certificate for: what the client asked for in SNI, falling back to the CONNECT host.</summary>

@@ -2,9 +2,9 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class ExchangeLogTests {
+public class ExchangeLog_Tests {
 
 	[Fact]
 	public async Task Get_ThroughProxy_LogsOneRecordWithRequestAndResponseDetails() {
@@ -105,7 +105,7 @@ public class ExchangeLogTests {
 	public void JsonLinesLog_WriteTwoRecords_AppendsTwoParsableLines() {
 
 		// Given: a JSON Lines log writing to a new temp file
-		var path = Path.Combine(Path.GetTempPath(), $"mos-test-{Guid.NewGuid():N}", "log.jsonl");
+		var path = Path.Combine(Path.GetTempPath(), $"mosaproxy-test-{Guid.NewGuid():N}", "log.jsonl");
 		var log = new JsonLinesExchangeLog(path);
 
 		try {

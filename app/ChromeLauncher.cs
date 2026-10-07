@@ -1,4 +1,4 @@
-namespace mos;
+namespace MoSaProxy;
 
 /// <summary>Builds ready-to-paste commands that start a throwaway Chrome profile that uses the proxy.</summary>
 public static class ChromeLauncher {
@@ -17,16 +17,16 @@ public static class ChromeLauncher {
 	/// <summary>
 	/// A one-line command for PowerShell (needs "&amp;" to run a quoted path, and $env:TEMP instead of %TEMP%).
 	/// With <paramref name="ignoreCertificateErrors"/> the throwaway profile ignores certificate errors, so it should only be
-	/// used for browsing through the proxy; leave it off when the mos root is trusted by Windows.
+	/// used for browsing through the proxy; leave it off when the MoSaProxy root is trusted by Windows.
 	/// (Chrome's --ignore-certificate-errors-spki-list is not used: Chrome only matches it against certificates the server
 	/// actually sends, and a self-signed root is never sent.)
 	/// </summary>
 	public static string PowerShellCommand(string chromePath, int proxyPort, bool ignoreCertificateErrors) =>
-		$"& \"{chromePath}\" --user-data-dir=\"$env:TEMP\\chrome-mos\" --proxy-server=\"http://127.0.0.1:{proxyPort}\"" + IgnoreFlag(ignoreCertificateErrors);
+		$"& \"{chromePath}\" --user-data-dir=\"$env:TEMP\\chrome-mosaproxy\" --proxy-server=\"http://127.0.0.1:{proxyPort}\"" + IgnoreFlag(ignoreCertificateErrors);
 
 	/// <summary>A one-line command for Command Prompt (uses %TEMP%).</summary>
 	public static string CmdCommand(string chromePath, int proxyPort, bool ignoreCertificateErrors) =>
-		$"\"{chromePath}\" --user-data-dir=\"%TEMP%\\chrome-mos\" --proxy-server=\"http://127.0.0.1:{proxyPort}\"" + IgnoreFlag(ignoreCertificateErrors);
+		$"\"{chromePath}\" --user-data-dir=\"%TEMP%\\chrome-mosaproxy\" --proxy-server=\"http://127.0.0.1:{proxyPort}\"" + IgnoreFlag(ignoreCertificateErrors);
 
 	static string IgnoreFlag(bool ignoreCertificateErrors) => ignoreCertificateErrors ? " --ignore-certificate-errors" : "";
 }

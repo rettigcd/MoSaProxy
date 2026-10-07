@@ -1,8 +1,8 @@
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class ColorConsoleTests {
+public class ColorConsole_Tests {
 
 	[Fact]
 	public void WriteLine_ColouredMessage_WritesOnlyTheTextAndEndsTheLine() {

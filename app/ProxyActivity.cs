@@ -1,4 +1,4 @@
-namespace mos;
+namespace MoSaProxy;
 
 public enum ActivityKind {
 	/// <summary>An HTTP request being forwarded (including one inside a decrypted tunnel).</summary>

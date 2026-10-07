@@ -6,9 +6,9 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class ShutdownTests {
+public class Shutdown_Tests {
 
 	static async Task WaitUntilAsync(Func<bool> condition, int timeoutMilliseconds = 5000) {
 		var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMilliseconds);

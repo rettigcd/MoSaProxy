@@ -4,9 +4,9 @@ using System.Xml.Linq;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 
-namespace mos.Tests;
+namespace MoSaProxy.Tests;
 
-public class InterceptionTests {
+public class Interception_Tests {
 
 	/// <summary>Options for an intercepting proxy that accepts the fake origin's self-signed certificate.</summary>
 	static ProxyOptions Intercepting(TempFolder caFolder, string? captureDirectory = null, params string[] bypass) => new() {
@@ -26,7 +26,7 @@ public class InterceptionTests {
 		await using var origin = await TestOrigin.StartAsync(c => c.Response.WriteAsync("hello"), https: true);
 		await using var proxy = await TestProxy.StartAsync(Intercepting(caFolder));
 
-		// When: a client that trusts the mos root requests a page over HTTPS through the proxy
+		// When: a client that trusts the MoSaProxy root requests a page over HTTPS through the proxy
 		var response = await proxy.Client.GetAsync(origin.UrlFor("/page?a=1"));
 
 		// Then: the client gets the origin's status and body, and the origin saw a normal request for that path and query
@@ -39,7 +39,7 @@ public class InterceptionTests {
 	}
 
 	[Fact]
-	public async Task Get_Intercepted_ClientIsShownACertificateIssuedByTheMosRoot() {
+	public async Task Get_Intercepted_ClientIsShownACertificateIssuedByTheMoSaProxyRoot() {
 
 		// Given: an HTTPS origin with its own self-signed certificate, and an intercepting proxy
 		using var caFolder = new TempFolder();
@@ -49,7 +49,7 @@ public class InterceptionTests {
 		// When: a client requests a page over HTTPS through the proxy
 		await proxy.Client.GetAsync(origin.UrlFor("/"));
 
-		// Then: the certificate the client saw was issued by the mos root, not the origin's own certificate
+		// Then: the certificate the client saw was issued by the MoSaProxy root, not the origin's own certificate
 		var seen = proxy.ServerCertificateSeenByClient!;
 		seen.Issuer.ShouldBe(proxy.Authority!.Root.Subject);
 		seen.Thumbprint.ShouldNotBe(origin.Certificate!.Thumbprint);
@@ -185,9 +185,9 @@ public class InterceptionTests {
 	}
 
 	[Fact]
-	public async Task Get_ClientDoesNotTrustTheMosRoot_HandshakeFailureIsLoggedAndTheProxyKeepsWorking() {
+	public async Task Get_ClientDoesNotTrustTheMoSaProxyRoot_HandshakeFailureIsLoggedAndTheProxyKeepsWorking() {
 
-		// Given: an HTTP origin and an HTTPS origin, and an intercepting proxy used by a client that does not trust the mos root
+		// Given: an HTTP origin and an HTTPS origin, and an intercepting proxy used by a client that does not trust the MoSaProxy root
 		using var caFolder = new TempFolder();
 		await using var httpsOrigin = await TestOrigin.StartAsync(c => Task.CompletedTask, https: true);
 		await using var httpOrigin = await TestOrigin.StartAsync(c => c.Response.WriteAsync("plain"));

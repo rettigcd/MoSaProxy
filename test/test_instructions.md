@@ -15,7 +15,7 @@ Add new rules to this file as they come up; follow everything here when writing 
 
 - xUnit for the test framework.
 - Shouldly for assertions (`result.ShouldBe(...)`). Do not use `Assert.*`.
-- Tests live in `test/mos.Tests/`. Mirror the structure of the code under test where practical.
+- Tests live in `test/MoSaProxy.Tests/`. Mirror the structure of the code under test where practical.
 
 ## Structure: Given / When / Then
 
@@ -59,7 +59,7 @@ without reading any code. Therefore:
 
 ## Naming
 
-- Test class: `<ClassUnderTest>Tests` (e.g. `HeaderFilterTests`).
+- Test class: `<ClassUnderTest>_Tests` (e.g. `HeaderFilter_Tests`).
 - Test method: `Method_Scenario_ExpectedResult` (e.g. `Filter_ConnectionHeader_IsRemoved`).
 - One file per test class, file name matches the class name.
 
