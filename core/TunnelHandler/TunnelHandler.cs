@@ -65,6 +65,7 @@ public sealed class TunnelHandler(
 		long toOrigin = 0, fromOrigin = 0;
 		string? error = null;
 		bool completed = false;
+		byte[]? rawHead = null;      // the CONNECT request exactly as the client sent it
 
 		// Logs and closes the capture for the CONNECT exchange itself. Called once, either explicitly
 		// (when interception takes over) or when the tunnel ends.
@@ -88,6 +89,7 @@ public sealed class TunnelHandler(
 				Error = error,
 			};
 			log.Write(record);
+			if (rawHead is not null) exchangeCapture.SetWireBytes(rawHead, null);
 			exchangeCapture.Complete(record);
 		}
 
@@ -97,6 +99,8 @@ public sealed class TunnelHandler(
 			var head = await ReadHeadAsync(input, headTimeout.Token);
 			if (head is null) { error = "incomplete CONNECT request"; return; }
 
+			rawHead = head.Value.Raw;
+			exchangeCapture.ExpectWireBytes(request: true);
 			(string method, target, protocol) = ParseRequestLine(head.Value.Lines[0]);
 			headers = head.Value.Lines.Skip(1).Select(ParseHeader).Where(h => h.Key.Length > 0).ToList();
 			exchangeCapture.WriteRequestHead(method, target, protocol, headers);
@@ -323,7 +327,9 @@ public sealed class TunnelHandler(
 	/// <summary>Looks at the first bytes of the connection without consuming them.</summary>
 	static async Task<bool> StartsWithConnectAsync(PipeReader input, CancellationToken cancellationToken) {
 		while (true) {
-			var result = await input.ReadAsync(cancellationToken);
+			// Bytes that have already arrived are used even if the connection has since been closed (a client may send its request and
+			// at once stop sending): ReadAsync would throw for a cancelled token before looking at them.
+			if (!input.TryRead(out var result)) result = await input.ReadAsync(cancellationToken);
 			var buffer = result.Buffer;
 			bool enough = buffer.Length >= ConnectPrefix.Length;
 			bool matches = false;
@@ -341,15 +347,17 @@ public sealed class TunnelHandler(
 	}
 
 	/// <summary>Reads up to the blank line that ends the request head and consumes exactly that much.</summary>
-	static async Task<(string[] Lines, int Length)?> ReadHeadAsync(PipeReader input, CancellationToken cancellationToken) {
+	static async Task<(string[] Lines, int Length, byte[] Raw)?> ReadHeadAsync(PipeReader input, CancellationToken cancellationToken) {
 		while (true) {
-			var result = await input.ReadAsync(cancellationToken);
+			if (!input.TryRead(out var result)) result = await input.ReadAsync(cancellationToken);   // (see StartsWithConnectAsync)
 			var buffer = result.Buffer;
 			var reader = new SequenceReader<byte>(buffer);
 			if (reader.TryReadTo(out ReadOnlySequence<byte> headBytes, "\r\n\r\n"u8, advancePastDelimiter: true)) {
 				string text = Encoding.Latin1.GetString(headBytes);
+				byte[] raw = [.. headBytes.ToArray(), .. "\r\n\r\n"u8.ToArray()];   // copied before AdvanceTo, which gives the memory back
 				input.AdvanceTo(reader.Position);
-				return (text.Split("\r\n"), (int)headBytes.Length);
+				// (the request head exactly as it arrived, with the blank line that ended it)
+				return (text.Split("\r\n"), (int)headBytes.Length, raw);
 			}
 			if (buffer.Length > MaxHeadBytes || result.IsCompleted) {
 				input.AdvanceTo(buffer.End);

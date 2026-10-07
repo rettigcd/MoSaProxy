@@ -59,7 +59,7 @@ public sealed class ProxyHost : IAsyncDisposable {
 		var stopping = new CancellationTokenSource();
 		var abort = new CancellationTokenSource();
 		// Exact wire bytes are only recorded when something keeps them.
-		var wireTaps = capture is NullSessionCapture ? null : new WireTaps(limits);
+		var wireTaps = capture is NullSessionCapture ? null : new WireTaps(limits, log, capture);
 		var tunnels = new TunnelHandler(log, capture, options, stopping.Token, abort.Token, activity, limits, authority);
 		var builder = WebApplication.CreateSlimBuilder();
 		builder.Logging.ClearProviders();

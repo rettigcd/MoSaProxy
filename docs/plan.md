@@ -18,7 +18,7 @@ folder itself is still named `mos` on disk.
 
 ## Where we are
 
-Phases 1 to 5 are done (see below), Phase 6 is built for HTTP/1.1 (exact bytes) and HTTP/2 (decoded from the frames), and 303 tests pass. MoSaProxy is a loopback-only forward proxy on Kestrel:
+Phases 1 to 5 are done (see below), Phase 6 is built for HTTP/1.1 (exact bytes) and HTTP/2 (decoded from the frames), and 310 tests pass. MoSaProxy is a loopback-only forward proxy on Kestrel:
 
 - HTTP/1.1 and HTTP/2, on both sides of the proxy.
 - HTTPS as blind tunnels or with TLS interception (a local root CA, with an offer at startup to trust it).
@@ -367,7 +367,7 @@ Original scope for reference:
   (2) MoSaProxy only knows when an exchange ended and how long it took, so the request-side timers all equal the start time,
   the response-side timers all equal the end time, and DNS, connect and TLS timings are 0. (3) `BitFlags` is 0 and
   `PipeInfo` is omitted. (4) `N_w.txt` is MoSaProxy's readable layout, not Fiddler's own WebSocket format, so Fiddler may not
-  display the messages. (5) The `_c`/`_s` files are still the Kestrel reconstructions described under Phase 6.
+  display the messages. (5) The `_c`/`_s` files hold the wire bytes (HTTP/1.x) or HTTP/1.1-style text decoded from the frames (HTTP/2) since Phase 6; the metadata flags `x-mosaproxy-request-source` and `x-mosaproxy-response-source` say which.
 - Not done, and not wanted in Phase 5: a viewer UI, and packaging. HAR export and the mitmproxy flow format are wanted, as
   Core capabilities (see "Architecture goal" below); their timing is open.
 - Packaging as a Windows service or a single-file executable.
@@ -464,8 +464,18 @@ HTTP/1.1-style text (`GET /path HTTP/2`, a `Host` line, then the headers in the 
 and `PUSH_PROMISE` are not supported (a push makes the direction give up and fall back to the `parsed` files). Tests: `HpackDecoder_Tests`,
 `Http2Capture_Tests`, `CaptureSource_Tests`.
 
-Known gaps: the `CONNECT` exchange's own `_c`/`_s` are still rebuilt; a request that Kestrel rejects (400) is not an
-exchange, so its bytes are not saved as one; the wire bytes are held in memory until the exchange ends; not yet checked against a packet capture or opened in Fiddler.
+**Gaps closed after that.** The `CONNECT` exchange's `_c` file is now the exact request head the client sent (its `_s` file is the proxy's own
+reply, byte for byte). A request that Kestrel rejects before the handler runs (a malformed or oversized request), or that the client
+abandons part way, is now logged and captured as an exchange of its own (mode `rejected`): the tap sees the bytes left over when the
+connection ends and the start of what Kestrel wrote back (`TapWriter`), and stray blank lines between requests are not reported. A
+client that sends its request and at once stops sending was silently dropped by the tunnel handler; it is now logged. Tests:
+`UnusualRequests_Tests`.
+
+Known limits that remain: (1) Kestrel treats a client that stops sending as one that has gone away, so such a request is logged as
+"client disconnected" and not answered; fixing that would need our own front end (Phase 6 option B). (2) HTTP/2 trailers are not
+written, and `PUSH_PROMISE` is not supported. (3) The wire bytes of an exchange are held in memory until it ends. (4) Of several
+identical concurrent HTTP/2 requests, the responses can be swapped between them. (5) Not compared with a packet capture (it needs a
+capture driver; the tests compare against the bytes a raw client and origin wrote) and no `.saz` has been opened in Fiddler.
 
 **Done when:** for HTTP/1.1 traffic (plain and intercepted HTTPS), the bytes in `N_c.txt` and `N_s.txt` are identical
 to a packet-level capture of the same exchange, verified by tests against the fake origin and by comparison with

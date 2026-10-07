@@ -23,13 +23,13 @@ A class is placed by its main focus. A line or two of console output inside an o
 
 | Category | Types |
 |---|---|
-| Core | 54 |
+| Core | 55 |
 | UI | 15 |
 | Mix | 0 |
 | Other | 0 |
-| **Total** | **69** (68 declared types, plus the `Program` class the compiler generates) |
+| **Total** | **70** (69 declared types, plus the `Program` class the compiler generates) |
 
-## Core (54)
+## Core (55)
 
 | Type | Kind | File | Why |
 |---|---|---|---|
@@ -83,6 +83,7 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `Http1Framing.Message` | nested struct | `WireTap/Http1Framing.cs` | One message found: start, length, first line, and whether it is complete. |
 | `WireBuffer` | internal class | `WireTap/WireBuffer.cs` | Bytes held for a connection, with absolute offsets, so claimed messages can be dropped from the front. |
 | `TapReader` | internal class | `WireTap/TapReader.cs` | Passes a connection's input through and reports each byte the moment it is delivered, even if never consumed. |
+| `TapWriter` | internal class | `WireTap/TapWriter.cs` | Passes a connection's output through and reports the bytes written, so a response Kestrel wrote itself (an error page) can be seen. |
 | `TapPipe` | internal class | `WireTap/TapPipe.cs` | The pipe that replaces a connection's transport so that its reader is tapped. |
 | `OriginTapStream` | internal class | `WireTap/OriginTapStream.cs` | Wraps an origin connection's plain-text stream, records what the origin sends, and notes which exchange each request write belongs to. |
 | `RootTrust` | class | `RootTrust.cs` | Checks, installs and removes the root certificate in a trust store. |

@@ -11,6 +11,9 @@ public sealed class ConnectionWire {
 	readonly WireBuffer _client = new();
 	readonly ResourceLimitMonitor _limits;
 	Http2Direction? _http2;
+	readonly byte[] _sent = new byte[MaxSentBytes];   // the first bytes the proxy wrote to the client since the last exchange finished
+	int _sentCount;
+	const int MaxSentBytes = 16 * 1024;
 	long _cursor;          // absolute offset where the next HTTP/1.x request starts
 	long _seen;
 	bool _stopped;
@@ -41,6 +44,37 @@ public sealed class ConnectionWire {
 		}
 	}
 
+	/// <summary>
+	/// Bytes the HTTP layer wrote to the client. Only the start of what was written since the last exchange finished is kept: enough to
+	/// see an error response that Kestrel wrote itself, not the body of a large download.
+	/// </summary>
+	internal void Sent(ReadOnlySpan<byte> bytes) {
+		lock (_lock) {
+			if (_stopped || _http2 is not null || _sentCount >= MaxSentBytes) return;
+			var take = bytes[..Math.Min(bytes.Length, MaxSentBytes - _sentCount)];
+			take.CopyTo(_sent.AsSpan(_sentCount));
+			_sentCount += take.Length;
+		}
+	}
+
+	/// <summary>
+	/// What is left at the end of the connection when a request never reached the handler: the bytes the client sent after the last
+	/// request that did (null if there are none worth reporting, or the connection was upgraded or is HTTP/2), and whatever the HTTP layer
+	/// answered. Kestrel rejects a malformed or oversized request itself, so this is how such a request is still seen.
+	/// </summary>
+	internal (byte[] Request, byte[]? Response)? TakeUnansweredRequest() {
+		lock (_lock) {
+			if (_stopped || _http2 is not null || _client.EndOffset <= _cursor) return null;
+			var request = _client.Copy(_cursor, (int)(_client.EndOffset - _cursor));
+			if (request.All(b => b is (byte)' ' or (byte)'\t' or (byte)'\r' or (byte)'\n')) return null;   // stray line breaks between requests
+			_cursor = _client.EndOffset;
+			_client.DropBefore(_cursor);
+			// (what was written before the last "HTTP/1." is the end of an earlier response, such as a final chunk)
+			int start = _sent.AsSpan(0, _sentCount).LastIndexOf("HTTP/1."u8);
+			return (request, start < 0 ? null : _sent.AsSpan(start, _sentCount - start).ToArray());
+		}
+	}
+
 	/// <summary>Stops recording and forgets what was held (the connection was upgraded, for example to a WebSocket).</summary>
 	public void StopRecording() { lock (_lock) Stop(); }
 
@@ -65,6 +99,7 @@ public sealed class ConnectionWire {
 			var bytes = _client.Copy(_cursor, length);
 			_cursor += length;
 			_client.DropBefore(_cursor);
+			_sentCount = 0;      // the response to this exchange is over; what is written next belongs to the next request
 			return bytes;
 		}
 	}
