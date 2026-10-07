@@ -18,7 +18,7 @@ folder itself is still named `mos` on disk.
 
 ## Where we are
 
-Phases 1 to 5 are done (see below), Phase 6 is under way (HTTP/1.1 byte-exact capture is built; HTTP/2 is not), and 292 tests pass. MoSaProxy is a loopback-only forward proxy on Kestrel:
+Phases 1 to 5 are done (see below), Phase 6 is under way (HTTP/1.1 byte-exact capture is built; HTTP/2 is not), and 295 tests pass. MoSaProxy is a loopback-only forward proxy on Kestrel:
 
 - HTTP/1.1 and HTTP/2, on both sides of the proxy.
 - HTTPS as blind tunnels or with TLS interception (a local root CA, with an offer at startup to trust it).
@@ -448,9 +448,14 @@ Each exchange's `N_m.xml` records where its two files came from, in `RequestSour
 from headers Kestrel or `HttpClient` had already parsed), or `generated` (written by the proxy itself, such as its own
 error pages and the reply to `CONNECT`). Tests: `CaptureSource_Tests`.
 
+When the wire bytes are expected (an HTTP/1.x request on a recorded connection; a response from a recorded origin connection), the
+file is not written while the exchange runs: only the head is kept in memory, and the file is written once, from the wire bytes,
+when the exchange ends. If the bytes never arrive, the file gets the kept head and `RequestBodyTruncated` /
+`ResponseBodyTruncated` say the body was not saved (the source is then `parsed`). Exchanges with nothing expected, such as
+HTTP/2, are still written as they run.
+
 Known gaps: the `CONNECT` exchange's own `_c`/`_s` are still rebuilt; a request that Kestrel rejects (400) is not an
-exchange, so its bytes are not saved as one; the wire bytes are held in memory until the exchange ends and the files are
-written twice (rebuilt, then replaced); not yet checked against a packet capture or opened in Fiddler.
+exchange, so its bytes are not saved as one; the wire bytes are held in memory until the exchange ends; not yet checked against a packet capture or opened in Fiddler.
 
 **Done when:** for HTTP/1.1 traffic (plain and intercepted HTTPS), the bytes in `N_c.txt` and `N_s.txt` are identical
 to a packet-level capture of the same exchange, verified by tests against the fake origin and by comparison with

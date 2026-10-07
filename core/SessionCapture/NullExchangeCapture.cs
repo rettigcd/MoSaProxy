@@ -23,6 +23,12 @@ public interface IExchangeCapture {
 	/// request and response files that were built from parsed data. Call before <see cref="Complete"/>; either may be null.
 	/// </summary>
 	void SetWireBytes(byte[]? request, byte[]? response);
+	/// <summary>
+	/// Says that <see cref="SetWireBytes"/> will supply the request and/or the response, so the file need not be written while the
+	/// exchange runs (it would only be overwritten). Call before the matching head is written. If the bytes then do not arrive, the
+	/// file keeps the head only and the metadata says the body is missing.
+	/// </summary>
+	void ExpectWireBytes(bool request = false, bool response = false);
 	/// <summary>Closes the files and writes the metadata file.</summary>
 	void Complete(ExchangeRecord record);
 }
@@ -37,5 +43,6 @@ public sealed class NullExchangeCapture : IExchangeCapture {
 	public void WriteResponseBody(ReadOnlySpan<byte> body) { }
 	public void WriteWebSocketMessage(bool fromClient, System.Net.WebSockets.WebSocketMessageType type, ReadOnlySpan<byte> payload, long totalBytes, string? note = null) { }
 	public void SetWireBytes(byte[]? request, byte[]? response) { }
+	public void ExpectWireBytes(bool request = false, bool response = false) { }
 	public void Complete(ExchangeRecord record) { }
 }

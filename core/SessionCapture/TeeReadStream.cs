@@ -10,8 +10,12 @@ public sealed class TeeReadStream(Stream inner, Stream? sink, long? maxBytes, Ac
 
 	public bool Truncated { get; private set; }
 
+	/// <summary>How many bytes have been read through this stream, whether or not they were copied.</summary>
+	public long BytesRead { get; private set; }
+
 	public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) {
 		int n = await inner.ReadAsync(buffer, cancellationToken);
+		BytesRead += n;
 		if (n > 0 && sink is not null && !_sinkFailed) {
 			var chunk = buffer[..n];
 			if (maxBytes is long max && _copied + n > max) {

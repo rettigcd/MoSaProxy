@@ -101,6 +101,8 @@ public sealed class ProxyHandler : IDisposable {
 		};
 
 		try {
+			// The exact request is read back from the connection's bytes when the exchange ends, so the file need not be written now.
+			if (connectionWire is not null && !isWebSocket && !HttpProtocol.IsHttp2(request.Protocol)) capture.ExpectWireBytes(request: true);
 			capture.WriteRequestHead(request.Method, rawTarget, request.Protocol,
 				request.Headers.Select(h => KeyValuePair.Create(h.Key, h.Value.ToString())));
 
@@ -189,15 +191,18 @@ public sealed class ProxyHandler : IDisposable {
 		// The timeout covers waiting for the origin's response headers; streaming the body is not time-limited.
 		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
 		timeout.CancelAfter(_options.UpstreamTimeout);
+		ExchangeWire? wireForExchange = null;
 		if (_wireTaps is not null) {
 			// The tap on the origin connection reads this to learn which exchange a request belongs to (see ExchangeWire).
-			var wire = new ExchangeWire(request.Method);
-			wire.MakeCurrent();
-			reportWire(wire);
+			wireForExchange = new ExchangeWire(request.Method);
+			wireForExchange.MakeCurrent();
+			reportWire(wireForExchange);
 		}
 		using var response = await _client.SendAsync(upstream, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
 		timeout.CancelAfter(Timeout.InfiniteTimeSpan);
 		reportOriginVersion(HttpVersions.Format(response.Version));
+
+		if (wireForExchange?.Origin is not null) capture.ExpectWireBytes(response: true);   // the exact response is read back from the origin connection's bytes
 
 		// The origin's response, as the origin sent it (before the proxy drops hop-by-hop headers).
 		// HTTP/2 has no reason phrase, so the standard one for the status code is written (as a text capture of HTTP/2 conventionally shows it).
