@@ -18,15 +18,19 @@ folder itself is still named `mos` on disk.
 
 ## Where we are
 
-`Program.cs` is a proof of concept:
+Phases 1 to 5 are done (see below), and 273 tests pass. MoSaProxy is a loopback-only forward proxy on Kestrel:
 
-- Plain-HTTP only, one request per connection (`Connection: close`).
-- Hand-rolled HTTP/1.1 parsing over `TcpListener`.
-- `CONNECT` (HTTPS) is rejected with 405.
-- Chunked request bodies are rejected with 501.
-- Logging is a single `Console.WriteLine` of method and URL.
+- HTTP/1.1 and HTTP/2, on both sides of the proxy.
+- HTTPS as blind tunnels or with TLS interception (a local root CA, with an offer at startup to trust it).
+- WebSockets, including over HTTP/2.
+- A JSON Lines log (with rotation), per-exchange capture files, and `.saz` export.
+- Graceful shutdown, and a stop at once, with the limit named, when the system runs out of something.
 
-The hand-rolled parser is fine for a spike but should not be extended into HTTP/2. See Phase 1.
+The code is a `core/` library (`MoSaProxy.Core`) plus the console program in `app/`; see
+[class-classification.md](class-classification.md). Tests are in two projects: `test/MoSaProxy.Core.Tests` and `test/MoSaProxy.App.Tests`.
+
+What is not done: byte-exact capture (Phase 6; the `_c`/`_s` files are still rebuilt from what Kestrel parsed), opening an
+exported `.saz` in Fiddler to confirm it loads, HAR and mitmproxy flow export, and removing the console diagnostics from Core.
 
 ## Key design decisions
 
@@ -170,7 +174,7 @@ a Core service for the orchestration every front end would repeat; one exporter 
 
 ## Phases
 
-### Phase 1: Solid HTTP/1.1 proxy
+### Phase 1: Solid HTTP/1.1 proxy *(done)*
 
 - Replace the hand-rolled parser with Kestrel (or keep the parser only if there is a reason to).
 - Keep-alive support, chunked request and response bodies, streaming (no buffering of whole bodies).
@@ -392,6 +396,44 @@ Notes for the spike:
 - Make sure capture stays off the hot path (bounded queue, drop or back-pressure policy defined).
 - Confirm the final files open correctly in Fiddler.
 
+**Spike result (option A, run on 2026-10-07; throwaway code, not kept).** A wire tap works, and Kestrel can stay.
+The spike put a tap in a second connection middleware registered after `TunnelHandler`, so it sees the plain transport of
+ordinary connections and the decrypted transport of intercepted ones, and a `SocketsHttpHandler.PlaintextStreamFilter`
+tap on the proxy-to-origin connection. It compared the tapped bytes with the bytes a raw client and a raw origin
+really wrote (odd header casing and spacing, duplicate headers, chunked responses, a POST body, keep-alive):
+
+| Question | Result |
+|---|---|
+| Client-to-proxy bytes, plain HTTP/1.1 | Byte-identical, 3 requests on one connection. |
+| Same, inside an intercepted TLS tunnel | Byte-identical (decrypted). |
+| A malformed request Kestrel rejects with 400 before our handler runs | Still captured byte-identically, **provided the tap records bytes when they are read, not when Kestrel consumes them** (a rejected request is never consumed). |
+| Origin-to-proxy bytes (the server side of the `.saz`), plain and intercepted | Byte-identical, including chunk framing. This is what Fiddler's `_s.txt` holds. |
+| Splitting a connection's bytes into exchanges, HTTP/1.1 | Works with framing rules only (head, then `Content-Length` or chunked; a response needs the request method for HEAD, and 1xx/204/304 have no body). No real parser needed. |
+| Telling which exchange an HTTP/1.1 origin connection's bytes belong to | Works: an `AsyncLocal` set in the handler is visible to the tap at the moment `SocketsHttpHandler` writes the request (3 of 3). This relies on `SocketsHttpHandler` writing HTTP/1.1 requests on the caller's own async flow, which is not documented behaviour; keep a test on it. |
+| HTTP/2, client side | Raw frames captured, including the preface; they group by stream id, and the handler can read the stream id (`IHttp2StreamIdFeature`), so each request maps to its frames. |
+| HTTP/2, origin side | Raw frames captured, but **the exchange cannot be identified**: stream ids on the two legs differ and are assigned in a different order (concurrent `/a` and `/b` swapped), and the `AsyncLocal` is empty because HTTP/2 writes happen on the connection's own writer loop (0 of 4). Open options: decode the HPACK headers of each origin-side HEADERS frame to read `:path` and `:authority`; or use a separate origin connection per exchange when capturing (the filter's `InitialRequestMessage` then identifies it, at the cost of multiplexing). |
+| What Kestrel writes back to the client | Not the origin's bytes (headers re-ordered and re-cased, `Date` added, chunking re-done). This is expected, and fine: `_c.txt` is the client-to-proxy side and `_s.txt` the origin-to-proxy side, like Fiddler. |
+
+Recommendation: build option A. Options B and C are not needed for HTTP/1.1. HTTP/2 still needs two decisions: how the
+origin leg's frames are matched to exchanges (above), and whether `_c`/`_s` hold the raw frames or an HTTP/1.1-style
+rendering (the raw frames cannot be read as text because the headers are HPACK-compressed). Not covered by the spike:
+WebSockets (the tap is below the upgrade, so it should see the raw frames), request bodies sent chunked,
+`Expect: 100-continue`, pipelined requests, the cost of the tap on the hot path, and whether Fiddler opens the result.
+
+**Decisions after the spike.**
+
+1. *HTTP/2 capture:* tap the raw frames on both legs and decode the HPACK headers (`:path`, `:authority`, and the rest).
+   The decoded headers identify which exchange each origin-side stream belongs to, and they give the headers exactly as
+   sent, in their original order and casing, which Kestrel's and `HttpClient`'s parsed headers do not guarantee.
+   No per-exchange origin connections.
+2. *What `_c.txt` / `_s.txt` hold for HTTP/2, for now:* an HTTP/1.1-style rendering, built from the decoded frames (request
+   line from the pseudo-headers, then the headers in wire order, then the body). The raw frames themselves are not saved.
+   The format may change later, so how an exchange is rendered into the capture files should sit behind one seam (one
+   place that turns an exchange into the bytes of `_c`/`_s`), so that changing it later does not touch the proxy.
+
+HTTP/2 is therefore not "raw" in the byte sense: the saved text is a rendering, but one made from the wire headers.
+HTTP/1.1 (plain and intercepted) stays byte-exact.
+
 **Done when:** for HTTP/1.1 traffic (plain and intercepted HTTPS), the bytes in `N_c.txt` and `N_s.txt` are identical
 to a packet-level capture of the same exchange, verified by tests against the fake origin and by comparison with
 Fiddler output for a sample session.
@@ -416,10 +458,11 @@ Fiddler output for a sample session.
 ## Suggested order of work
 
 1. Phase 1 (with tests), commit. *(done)*
-2. Phase 1b: capture folder, commit.
-3. Phase 2, commit.
-4. Phase 3 spike on the Kestrel / `SslStream` question, then the implementation. Keep the Phase 6 goal in mind
-   (byte-exact capture) when choosing how the decrypted stream is handed to the HTTP layer.
-5. Phase 4.
-6. Phase 5 items as needed, including the `.saz` writer.
-7. Phase 6: byte-exact capture. Starts with the A / B / C spike.
+2. Phase 1b: capture folder, commit. *(done)*
+3. Phase 2, commit. *(done)*
+4. Phase 3 spike on the Kestrel / `SslStream` question, then the implementation. *(done)*
+5. Phase 4. *(done)*
+6. Phase 5 items, including the `.saz` writer. *(done, except the items dropped)*
+7. Phase 6: byte-exact capture. Starts with the A / B / C spike. *(next)*
+8. Then, in no fixed order: HAR and mitmproxy flow export in Core, the Core cleanup (diagnostics events, a shared session
+   runner), and confirming an exported `.saz` opens in Fiddler.
