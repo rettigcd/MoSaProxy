@@ -1,5 +1,3 @@
-using Microsoft.AspNetCore.Http;
-
 namespace MoSaProxy;
 
 public static class HeaderRules {

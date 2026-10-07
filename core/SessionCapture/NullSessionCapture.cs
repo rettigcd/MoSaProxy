@@ -1,6 +1,3 @@
-using System.Text;
-using System.Xml.Linq;
-
 namespace MoSaProxy;
 
 /// <summary>Source of per-exchange capture files (Fiddler-style N_c.txt / N_s.txt / N_m.xml).</summary>

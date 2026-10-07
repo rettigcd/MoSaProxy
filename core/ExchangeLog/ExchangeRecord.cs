@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace MoSaProxy;
 
 public interface IExchangeLog {

@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Net.WebSockets;
-using Microsoft.AspNetCore.Http;
 
 namespace MoSaProxy;
 

@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace MoSaProxy;
 
 /// <param name="onFailure">Called with the exception when a sink fails to write (the other sinks still get the record).</param>

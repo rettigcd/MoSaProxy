@@ -1,6 +1,3 @@
-using System.Text;
-using System.Xml.Linq;
-
 namespace MoSaProxy;
 
 /// <summary>Writes each run's exchanges into a new sub-folder of <c>baseDirectory</c>, numbered from 1.</summary>
