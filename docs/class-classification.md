@@ -23,13 +23,13 @@ A class is placed by its main focus. A line or two of console output inside an o
 
 | Category | Types |
 |---|---|
-| Core | 36 |
+| Core | 47 |
 | UI | 15 |
 | Mix | 0 |
 | Other | 0 |
-| **Total** | **51** (50 declared types, plus the `Program` class the compiler generates) |
+| **Total** | **62** (61 declared types, plus the `Program` class the compiler generates) |
 
-## Core (36)
+## Core (47)
 
 | Type | Kind | File | Why |
 |---|---|---|---|
@@ -67,6 +67,17 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `SazExporter` | static class | `SazExporter/SazExporter.cs` | Packs a capture folder into a Fiddler `.saz` archive: the zip layout, the content-types file, Fiddler's `Session` metadata, and the readable `_index.htm`. It has no console code. |
 | `SazExporter.Exchange` | nested record | `SazExporter/SazExporter.cs` | One exchange's metadata as read back for the export. |
 | `SazExporter.IndexRow` | nested record | `SazExporter/SazExporter.cs` | One row of the archive's `_index.htm`. |
+| `CaptureSource` | static class | `SessionCapture/CaptureSource.cs` | The names recorded in an exchange's metadata for where a capture file came from: `wire`, `http2-decoded`, `parsed`, `generated`. |
+| `WireTaps` | class | `WireTap/WireTaps.cs` | Records the bytes that cross the wire on HTTP/1.x connections: a connection middleware for what clients send, and a stream filter for what origins send. |
+| `ConnectionWire` | class | `WireTap/ConnectionWire.cs` | The bytes one client connection sent, split into requests, so each exchange can take its exact request. |
+| `OriginWire` | internal class | `WireTap/OriginWire.cs` | The bytes one origin connection sent, split into responses, matched to the exchanges that asked for them. |
+| `ExchangeWire` | class | `WireTap/ExchangeWire.cs` | Ties an exchange to the origin connection it used, through an `AsyncLocal`, so its response can be found. |
+| `Http1Framing` | static class | `WireTap/Http1Framing.cs` | Finds where HTTP/1.1 messages begin and end in a byte stream, by the framing rules only. |
+| `Http1Framing.Message` | nested struct | `WireTap/Http1Framing.cs` | One message found: start, length, first line, and whether it is complete. |
+| `WireBuffer` | internal class | `WireTap/WireBuffer.cs` | Bytes held for a connection, with absolute offsets, so claimed messages can be dropped from the front. |
+| `TapReader` | internal class | `WireTap/TapReader.cs` | Passes a connection's input through and reports each byte the moment it is delivered, even if never consumed. |
+| `TapPipe` | internal class | `WireTap/TapPipe.cs` | The pipe that replaces a connection's transport so that its reader is tapped. |
+| `OriginTapStream` | internal class | `WireTap/OriginTapStream.cs` | Wraps an origin connection's plain-text stream, records what the origin sends, and notes which exchange each request write belongs to. |
 | `RootTrust` | class | `RootTrust.cs` | Checks, installs and removes the root certificate in a trust store. |
 | `WindowsUserRootStore` | class | `RootTrust.cs` | The current Windows user's trusted root store (the Windows implementation of `IRootStore`). |
 

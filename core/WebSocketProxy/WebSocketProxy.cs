@@ -96,7 +96,7 @@ public sealed class WebSocketProxy(HttpMessageInvoker upstream, ProxyOptions opt
 		if (!context.Response.HasStarted) {
 			context.Response.StatusCode = status;
 			context.Response.ContentType = "text/plain";
-			capture.WriteResponseHead($"HTTP/1.1 {status} {Microsoft.AspNetCore.WebUtilities.ReasonPhrases.GetReasonPhrase(status)}", new[] { KeyValuePair.Create("Content-Type", "text/plain") });
+			capture.WriteResponseHead($"HTTP/1.1 {status} {Microsoft.AspNetCore.WebUtilities.ReasonPhrases.GetReasonPhrase(status)}", new[] { KeyValuePair.Create("Content-Type", "text/plain") }, generated: true);
 			try { await context.Response.WriteAsync(error); } catch { }
 		}
 		return Failed(status, error);

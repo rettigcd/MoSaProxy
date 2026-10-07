@@ -18,7 +18,7 @@ folder itself is still named `mos` on disk.
 
 ## Where we are
 
-Phases 1 to 5 are done (see below), and 273 tests pass. MoSaProxy is a loopback-only forward proxy on Kestrel:
+Phases 1 to 5 are done (see below), Phase 6 is under way (HTTP/1.1 byte-exact capture is built; HTTP/2 is not), and 292 tests pass. MoSaProxy is a loopback-only forward proxy on Kestrel:
 
 - HTTP/1.1 and HTTP/2, on both sides of the proxy.
 - HTTPS as blind tunnels or with TLS interception (a local root CA, with an offer at startup to trust it).
@@ -29,7 +29,7 @@ Phases 1 to 5 are done (see below), and 273 tests pass. MoSaProxy is a loopback-
 The code is a `core/` library (`MoSaProxy.Core`) plus the console program in `app/`; see
 [class-classification.md](class-classification.md). Tests are in two projects: `test/MoSaProxy.Core.Tests` and `test/MoSaProxy.App.Tests`.
 
-What is not done: byte-exact capture (Phase 6; the `_c`/`_s` files are still rebuilt from what Kestrel parsed), opening an
+What is not done: byte-exact capture for HTTP/2 (Phase 6; those files are still rebuilt from what Kestrel and `HttpClient` parsed), opening an
 exported `.saz` in Fiddler to confirm it loads, HAR and mitmproxy flow export, and removing the console diagnostics from Core.
 
 ## Key design decisions
@@ -434,6 +434,24 @@ WebSockets (the tap is below the upgrade, so it should see the raw frames), requ
 HTTP/2 is therefore not "raw" in the byte sense: the saved text is a rendering, but one made from the wire headers.
 HTTP/1.1 (plain and intercepted) stays byte-exact.
 
+**Built so far (HTTP/1.1):** `WireTaps` (`core/WireTap/`) puts a tap in a connection middleware registered after the tunnel handler,
+and a `PlaintextStreamFilter` on the proxy's own origin connections. It is only installed when capture is on. Each exchange
+takes its exact request from the client connection's bytes (in order) and its exact response from the origin connection's
+bytes (found through an `AsyncLocal`), and `FileExchangeCapture` replaces the rebuilt `_c`/`_s` files with them. The body limit
+keeps the whole head and cuts the body. HTTP/2 connections, and WebSocket upgrades, are not recorded and keep the rebuilt files.
+Tests: `Http1Framing_Tests`, `WireTaps_Tests` (plain keep-alive with odd bytes, intercepted HTTPS, chunked request, body limit,
+HTTP/2 falls back to text).
+
+Each exchange's `N_m.xml` records where its two files came from, in `RequestSource` and `ResponseSource` (also exported as the
+`.saz` flags `x-mosaproxy-request-source` and `x-mosaproxy-response-source`): `wire` (the exact bytes), `http2-decoded`
+(decoded from HTTP/2 frames, headers in wire order, written as HTTP/1.1-style text; not produced yet), `parsed` (written
+from headers Kestrel or `HttpClient` had already parsed), or `generated` (written by the proxy itself, such as its own
+error pages and the reply to `CONNECT`). Tests: `CaptureSource_Tests`.
+
+Known gaps: the `CONNECT` exchange's own `_c`/`_s` are still rebuilt; a request that Kestrel rejects (400) is not an
+exchange, so its bytes are not saved as one; the wire bytes are held in memory until the exchange ends and the files are
+written twice (rebuilt, then replaced); not yet checked against a packet capture or opened in Fiddler.
+
 **Done when:** for HTTP/1.1 traffic (plain and intercepted HTTPS), the bytes in `N_c.txt` and `N_s.txt` are identical
 to a packet-level capture of the same exchange, verified by tests against the fake origin and by comparison with
 Fiddler output for a sample session.
@@ -463,6 +481,6 @@ Fiddler output for a sample session.
 4. Phase 3 spike on the Kestrel / `SslStream` question, then the implementation. *(done)*
 5. Phase 4. *(done)*
 6. Phase 5 items, including the `.saz` writer. *(done, except the items dropped)*
-7. Phase 6: byte-exact capture. Starts with the A / B / C spike. *(next)*
+7. Phase 6: byte-exact capture. The spike chose option A (a wire tap). HTTP/1.1 is built *(done)*; HTTP/2 with HPACK decoding is *next*.
 8. Then, in no fixed order: HAR and mitmproxy flow export in Core, the Core cleanup (diagnostics events, a shared session
    runner), and confirming an exported `.saz` opens in Fiddler.

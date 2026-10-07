@@ -111,7 +111,7 @@ public sealed class TunnelHandler(
 			if (ShouldIntercept(host)) {
 				mode = "intercept";
 				status = 200;
-				exchangeCapture.WriteResponseHead("HTTP/1.1 200 Connection Established", Array.Empty<KeyValuePair<string, string>>());
+				exchangeCapture.WriteResponseHead("HTTP/1.1 200 Connection Established", Array.Empty<KeyValuePair<string, string>>(), generated: true);
 				await connection.Transport.Output.WriteAsync(Established);
 				// The CONNECT itself is finished; the requests inside the tunnel are logged as their own exchanges.
 				CompleteOnce();
@@ -139,7 +139,7 @@ public sealed class TunnelHandler(
 
 			using (origin) {
 				status = 200;
-				exchangeCapture.WriteResponseHead("HTTP/1.1 200 Connection Established", Array.Empty<KeyValuePair<string, string>>());
+				exchangeCapture.WriteResponseHead("HTTP/1.1 200 Connection Established", Array.Empty<KeyValuePair<string, string>>(), generated: true);
 				await connection.Transport.Output.WriteAsync(Established);
 
 				// Bytes the client sent right after its request head are still in the pipe and are relayed first.
@@ -377,7 +377,7 @@ public sealed class TunnelHandler(
 			KeyValuePair.Create("Content-Length", body.Length.ToString()),
 			KeyValuePair.Create("Connection", "close"),
 		};
-		capture.WriteResponseHead($"HTTP/1.1 {status} {reason}", headers);
+		capture.WriteResponseHead($"HTTP/1.1 {status} {reason}", headers, generated: true);
 		capture.WriteResponseBody(body);
 
 		var text = new StringBuilder($"HTTP/1.1 {status} {reason}\r\n");

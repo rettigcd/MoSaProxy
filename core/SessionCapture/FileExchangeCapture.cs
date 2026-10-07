@@ -18,6 +18,8 @@ sealed class FileExchangeCapture : IExchangeCapture {
 	readonly object _messagesLock = new();   // the two directions of a WebSocket write from different threads
 
 	readonly ResourceLimitMonitor? _limits;
+	bool _responseGenerated;
+	byte[]? _wireRequest, _wireResponse;     // the exact bytes, when known; they replace the files built from parsed data
 
 	public FileExchangeCapture(string directory, int number, long? maxBodyBytes, ResourceLimitMonitor? limits) {
 		_directory = directory;
@@ -42,8 +44,10 @@ sealed class FileExchangeCapture : IExchangeCapture {
 	public void WriteRequestHead(string method, string target, string protocol, IEnumerable<KeyValuePair<string, string>> headers) =>
 		WriteHead(ref _client, $"{method} {target} {protocol}", headers);
 
-	public void WriteResponseHead(string statusLine, IEnumerable<KeyValuePair<string, string>> headers) =>
+	public void WriteResponseHead(string statusLine, IEnumerable<KeyValuePair<string, string>> headers, bool generated = false) {
+		_responseGenerated = generated;
 		WriteHead(ref _server, statusLine, headers);
+	}
 
 	void WriteHead(ref FileStream? file, string firstLine, IEnumerable<KeyValuePair<string, string>> headers) {
 		if (file is null) return;
@@ -94,10 +98,41 @@ sealed class FileExchangeCapture : IExchangeCapture {
 		}
 	}
 
+	public void SetWireBytes(byte[]? request, byte[]? response) {
+		_wireRequest = request;
+		_wireResponse = response;
+	}
+
+	/// <summary>
+	/// Replaces a file written from parsed data with the exact bytes. The body limit applies to the body only, so the whole head is kept.
+	/// Returns whether the bytes were cut at the limit. A file that could not be created stays disabled.
+	/// </summary>
+	bool ReplaceWithWireBytes(string name, bool fileWasOpen, byte[]? bytes) {
+		if (bytes is null || !fileWasOpen) return false;
+		bool truncated = false;
+		if (_maxBodyBytes is { } max) {
+			int headLength = bytes.AsSpan().IndexOf("\r\n\r\n"u8);
+			if (headLength >= 0 && bytes.Length - (headLength + 4) > max) {
+				bytes = bytes[..(headLength + 4 + (int)max)];
+				truncated = true;
+			}
+		}
+		try { File.WriteAllBytes(Path.Combine(_directory, name), bytes); }
+		catch (Exception ex) {
+			Console.Error.WriteLine($"Capture write failed: {ex.Message}");
+			_limits?.Report($"writing capture file {name}", ex);
+		}
+		return truncated;
+	}
+
 	public void Complete(ExchangeRecord record) {
 		try {
+			bool clientOpen = _client is not null, serverOpen = _server is not null;
 			_client?.Dispose();
 			_server?.Dispose();
+			bool requestFromWire = clientOpen && _wireRequest is not null, responseFromWire = serverOpen && _wireResponse is not null;
+			bool requestTruncated = ReplaceWithWireBytes($"{Number}_c.txt", clientOpen, _wireRequest);
+			bool responseTruncated = ReplaceWithWireBytes($"{Number}_s.txt", serverOpen, _wireResponse);
 			lock (_messagesLock) _messages?.Dispose();
 			var meta = new XElement("Exchange",
 				new XAttribute("Number", Number),
@@ -113,8 +148,10 @@ sealed class FileExchangeCapture : IExchangeCapture {
 				new XElement("Status", record.Status?.ToString() ?? ""),
 				new XElement("RequestBytes", record.RequestBytes),
 				new XElement("ResponseBytes", record.ResponseBytes),
-				new XElement("RequestBodyTruncated", _requestTee?.Truncated ?? false),
-				new XElement("ResponseBodyTruncated", _responseTee?.Truncated ?? false),
+				new XElement("RequestSource", requestFromWire ? CaptureSource.Wire : CaptureSource.Parsed),
+				new XElement("ResponseSource", responseFromWire ? CaptureSource.Wire : _responseGenerated ? CaptureSource.Generated : CaptureSource.Parsed),
+				new XElement("RequestBodyTruncated", (_wireRequest is null ? _requestTee?.Truncated : requestTruncated) ?? false),
+				new XElement("ResponseBodyTruncated", (_wireResponse is null ? _responseTee?.Truncated : responseTruncated) ?? false),
 				new XElement("DurationMs", Math.Round(record.DurationMs, 1)),
 				new XElement("Mode", record.Mode),
 				new XElement("Error", record.Error ?? ""));

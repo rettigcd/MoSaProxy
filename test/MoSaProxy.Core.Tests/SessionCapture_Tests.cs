@@ -29,7 +29,7 @@ public class SessionCapture_Tests {
 		// When: a client requests a page on the origin through the proxy
 		await proxy.Client.GetAsync(origin.UrlFor("/page?a=1"));
 
-		// Then: the run folder holds 1_c.txt with the request line and headers, 1_s.txt with the status line, headers and body, and 1_m.xml
+		// Then: the run folder holds 1_c.txt with the request line and headers, 1_s.txt with the status line, headers and body (as the origin sent it: chunked), and 1_m.xml
 		var request = Text(await ReadCapturedAsync(proxy, "1_c.txt"));
 		request.ShouldStartWith($"GET {origin.UrlFor("/page?a=1")} HTTP/1.1\r\n");
 		request.ShouldContain($"Host: 127.0.0.1:{origin.Port}\r\n");
@@ -38,7 +38,7 @@ public class SessionCapture_Tests {
 		var response = Text(await ReadCapturedAsync(proxy, "1_s.txt"));
 		response.ShouldStartWith("HTTP/1.1 200 OK\r\n");
 		response.ShouldContain("X-Origin: yes\r\n");
-		response.ShouldEndWith("\r\n\r\nhello");
+		response.ShouldEndWith("\r\n\r\n5\r\nhello\r\n0\r\n\r\n");
 
 		var meta = XDocument.Load(Path.Combine(proxy.CaptureRunDirectory!, "1_m.xml")).Root!;
 		meta.Attribute("Number")!.Value.ShouldBe("1");
@@ -66,11 +66,11 @@ public class SessionCapture_Tests {
 	[Fact]
 	public async Task Get_BinaryResponse_IsCapturedByteForByte() {
 
-		// Given: an origin that returns 100,000 random bytes (like an image) and a proxy capturing into a new folder
+		// Given: an origin that returns 100,000 random bytes (like an image) with a Content-Length, and a proxy capturing into a new folder
 		using var folder = new TempFolder();
 		var data = new byte[100_000];
 		new Random(7).NextBytes(data);
-		await using var origin = await TestOrigin.StartAsync(c => { c.Response.ContentType = "image/png"; return c.Response.Body.WriteAsync(data).AsTask(); });
+		await using var origin = await TestOrigin.StartAsync(c => { c.Response.ContentType = "image/png"; c.Response.ContentLength = data.Length; return c.Response.Body.WriteAsync(data).AsTask(); });
 		await using var proxy = await TestProxy.StartAsync(CaptureTo(folder));
 
 		// When: a client downloads it through the proxy

@@ -277,11 +277,11 @@ public class SazExporter_Tests {
 		// When: the run folder is exported
 		int sessions = SazExporter.Export(run, saz);
 
-		// Then: the archive holds that one session, with the request line and the response body readable inside it
+		// Then: the archive holds that one session, with the request line and the origin's response (chunked, as it was sent) inside it
 		sessions.ShouldBe(1);
 		using var zip = Open(saz);
 		Encoding.Latin1.GetString(ReadBytes(zip, "raw/1_c.txt")).ShouldStartWith($"GET {origin.UrlFor("/page")} HTTP/1.1\r\n");
-		Encoding.Latin1.GetString(ReadBytes(zip, "raw/1_s.txt")).ShouldEndWith("\r\n\r\nfrom the origin");
+		Encoding.Latin1.GetString(ReadBytes(zip, "raw/1_s.txt")).ShouldEndWith("\r\n\r\nf\r\nfrom the origin\r\n0\r\n\r\n");
 		ReadXml(zip, "raw/1_m.xml").Element("SessionFlags")!.Elements("SessionFlag")
 			.Single(f => f.Attribute("N")!.Value == "x-mosaproxy-mode").Attribute("V")!.Value.ShouldBe("plain");
 	}

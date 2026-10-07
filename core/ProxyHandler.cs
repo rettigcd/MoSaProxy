@@ -16,9 +16,11 @@ public sealed class ProxyHandler : IDisposable {
 	readonly ProxyActivity _activity;
 
 	readonly ResourceLimitMonitor _limits;
+	readonly WireTaps? _wireTaps;
 
 	public ProxyHandler(IExchangeLog log, ISessionCapture capture, ProxyOptions options, ProxyActivity activity, ResourceLimitMonitor limits,
-		CancellationToken stopping = default, CancellationToken shutdown = default) {
+		CancellationToken stopping = default, CancellationToken shutdown = default, WireTaps? wireTaps = null) {
+		_wireTaps = wireTaps;
 		_log = log;
 		_activity = activity;
 		_limits = limits;
@@ -30,6 +32,8 @@ public sealed class ProxyHandler : IDisposable {
 			UseCookies = false,
 			AutomaticDecompression = System.Net.DecompressionMethods.None,
 		};
+		if (wireTaps is not null)
+			handler.PlaintextStreamFilter = (context, _) => ValueTask.FromResult(wireTaps.TapOrigin(context));
 		if (options.OriginCertificateValidation is { } validation)
 			handler.SslOptions.RemoteCertificateValidationCallback = validation;
 		_client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
@@ -63,6 +67,8 @@ public sealed class ProxyHandler : IDisposable {
 		bool isWebSocket = context.WebSockets.IsWebSocketRequest && uri is not null && (interceptBase is not null || uri.Scheme == Uri.UriSchemeHttp);
 		using var tracking = _activity.Track(isWebSocket ? ActivityKind.WebSocket : ActivityKind.Exchange);
 		var counted = new CountingStream(request.Body);
+		var connectionWire = _wireTaps?.ForConnection(context.Connection.Id);
+		ExchangeWire? exchangeWire = null;
 		long responseBytes = 0;
 		string mode = interceptBase is null ? "plain" : "intercept";
 		string? error = null;
@@ -102,6 +108,7 @@ public sealed class ProxyHandler : IDisposable {
 				// A WebSocket connection (an HTTP/1.1 upgrade, or HTTP/2 extended CONNECT) lives for as long as the client keeps it.
 				// The handshake is logged as soon as it succeeds, and a second record with the totals when the connection closes.
 				mode = "websocket";
+				connectionWire?.StopRecording();      // from here the connection carries WebSocket frames, not HTTP messages
 				var summary = await _webSockets.RunAsync(context, capture, uri!, () => _log.Write(MakeRecord("websocket", 101, 0, 0, null)));
 				mode = summary.Status == 101 ? "websocket-closed" : "rejected";
 				statusOverride = summary.Status == 0 ? null : summary.Status;
@@ -123,7 +130,7 @@ public sealed class ProxyHandler : IDisposable {
 				await RespondAsync(context, capture, 400, interceptBase is null ? "Expected an absolute http:// URL." : "Expected a request path.");
 			}
 			else {
-				responseBytes = await ForwardAsync(context, capture, uri, counted, v => originVersion = v);
+				responseBytes = await ForwardAsync(context, capture, uri, counted, v => originVersion = v, w => exchangeWire = w);
 			}
 		}
 		catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) {
@@ -149,11 +156,15 @@ public sealed class ProxyHandler : IDisposable {
 		finally {
 			var record = MakeRecord(mode, nothingSent ? null : statusOverride ?? context.Response.StatusCode, requestBytesOverride ?? counted.BytesRead, responseBytes, error);
 			_log.Write(record);
+			if (connectionWire is not null && !isWebSocket) {
+				try { capture.SetWireBytes(connectionWire.TakeNextRequest(), exchangeWire?.TakeResponse()); }
+				catch (Exception ex) when (ex is not OutOfMemoryException) { Console.Error.WriteLine($"Wire capture failed: {ex.Message}"); }
+			}
 			capture.Complete(record);
 		}
 	}
 
-	async Task<long> ForwardAsync(HttpContext context, IExchangeCapture capture, Uri uri, CountingStream requestBody, Action<string> reportOriginVersion) {
+	async Task<long> ForwardAsync(HttpContext context, IExchangeCapture capture, Uri uri, CountingStream requestBody, Action<string> reportOriginVersion, Action<ExchangeWire> reportWire) {
 		var request = context.Request;
 		using var upstream = new HttpRequestMessage(new HttpMethod(request.Method), uri);
 
@@ -178,6 +189,12 @@ public sealed class ProxyHandler : IDisposable {
 		// The timeout covers waiting for the origin's response headers; streaming the body is not time-limited.
 		using var timeout = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
 		timeout.CancelAfter(_options.UpstreamTimeout);
+		if (_wireTaps is not null) {
+			// The tap on the origin connection reads this to learn which exchange a request belongs to (see ExchangeWire).
+			var wire = new ExchangeWire(request.Method);
+			wire.MakeCurrent();
+			reportWire(wire);
+		}
 		using var response = await _client.SendAsync(upstream, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
 		timeout.CancelAfter(Timeout.InfiniteTimeSpan);
 		reportOriginVersion(HttpVersions.Format(response.Version));
@@ -214,7 +231,7 @@ public sealed class ProxyHandler : IDisposable {
 		capture.WriteResponseHead($"HTTP/1.1 {status} {ReasonPhrases.GetReasonPhrase(status)}", new[] {
 			KeyValuePair.Create("Content-Type", "text/plain"),
 			KeyValuePair.Create("Content-Length", bytes.Length.ToString()),
-		});
+		}, generated: true);
 		capture.WriteResponseBody(bytes);
 		context.Response.StatusCode = status;
 		context.Response.ContentType = "text/plain";

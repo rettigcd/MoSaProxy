@@ -71,7 +71,7 @@ public static class SazExporter {
 	sealed record Exchange(
 		int Number, DateTimeOffset End, double DurationMs, string Client, string Method, string Url, string Host, int Port, string Scheme,
 		string ClientProtocol, string OriginProtocol, string Status, long RequestBytes, long ResponseBytes, string Mode, string Error,
-		string ClientMessages, string OriginMessages, bool Truncated);
+		string ClientMessages, string OriginMessages, bool Truncated, string RequestSource, string ResponseSource);
 
 	record IndexRow(Exchange Exchange, string RequestLine);
 
@@ -91,7 +91,7 @@ public static class SazExporter {
 
 		return new Exchange(number, end, duration, Text("Client"), Text("Method"), Text("Url"), Text("Host"), (int)Number("Port"), Text("Scheme"),
 			Text("ClientHttpVersion"), Text("OriginHttpVersion"), Text("Status"), Number("RequestBytes"), Number("ResponseBytes"),
-			Text("Mode"), Text("Error"), Text("ClientMessages"), Text("OriginMessages"), truncated);
+			Text("Mode"), Text("Error"), Text("ClientMessages"), Text("OriginMessages"), truncated, Text("RequestSource"), Text("ResponseSource"));
 	}
 
 	static string ReadRequestLine(string requestFile) {
@@ -122,6 +122,8 @@ public static class SazExporter {
 		Flag("x-mosaproxy-error", e.Error);
 		Flag("x-mosaproxy-client-messages", e.ClientMessages);
 		Flag("x-mosaproxy-origin-messages", e.OriginMessages);
+		Flag("x-mosaproxy-request-source", e.RequestSource);
+		Flag("x-mosaproxy-response-source", e.ResponseSource);
 		if (e.Truncated) Flag("x-mosaproxy-body-truncated", "true");
 
 		var session = new XElement("Session",
