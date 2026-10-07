@@ -16,10 +16,13 @@ public sealed class ProxyHandler : IDisposable {
 	readonly WebSocketProxy _webSockets;
 	readonly ProxyActivity _activity;
 
-	public ProxyHandler(IExchangeLog log, ISessionCapture capture, ProxyOptions options, ProxyActivity activity,
+	readonly ResourceLimitMonitor _limits;
+
+	public ProxyHandler(IExchangeLog log, ISessionCapture capture, ProxyOptions options, ProxyActivity activity, ResourceLimitMonitor limits,
 		CancellationToken stopping = default, CancellationToken shutdown = default) {
 		_log = log;
 		_activity = activity;
+		_limits = limits;
 		_capture = capture;
 		_options = options;
 		var handler = new SocketsHttpHandler {
@@ -31,7 +34,7 @@ public sealed class ProxyHandler : IDisposable {
 		if (options.OriginCertificateValidation is { } validation)
 			handler.SslOptions.RemoteCertificateValidationCallback = validation;
 		_client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
-		_webSockets = new WebSocketProxy(_client, options, stopping, shutdown);
+		_webSockets = new WebSocketProxy(_client, options, limits, stopping, shutdown);
 	}
 
 	public void Dispose() => _client.Dispose();
@@ -134,10 +137,12 @@ public sealed class ProxyHandler : IDisposable {
 			await TryRespondAsync(context, capture, 504, "Origin did not respond in time.");
 		}
 		catch (HttpRequestException ex) {
+			_limits.Report("connecting to an origin", ex);   // out of sockets, for example, as opposed to an origin that is just down
 			error = $"origin unreachable: {ex.InnerException?.Message ?? ex.Message}";
 			await TryRespondAsync(context, capture, 502, "Could not reach the origin.");
 		}
 		catch (Exception ex) {
+			_limits.Report("forwarding a request", ex);
 			error = ex.Message;
 			if (context.Response.HasStarted) context.Abort();
 			else await TryRespondAsync(context, capture, 502, "Proxy error.");

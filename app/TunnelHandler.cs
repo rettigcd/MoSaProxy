@@ -27,7 +27,7 @@ namespace mos;
 /// <param name="shutdown">Signalled when the drain period is over: whatever is left is aborted.</param>
 public sealed class TunnelHandler(
 	IExchangeLog log, ISessionCapture capture, ProxyOptions options, CancellationToken stopping, CancellationToken shutdown,
-	ProxyActivity activity, CertificateAuthority? authority = null) {
+	ProxyActivity activity, ResourceLimitMonitor limits, CertificateAuthority? authority = null) {
 
 	/// <summary>Key in the connection's Items holding the https:// base URI of an intercepted connection.</summary>
 	public const string InterceptTargetKey = "mos.intercept-target";
@@ -132,6 +132,7 @@ public sealed class TunnelHandler(
 				return;
 			}
 			catch (SocketException ex) {
+				limits.Report("connecting to an origin", ex);
 				status = 502;
 				error = $"origin unreachable: {ex.Message}";
 				await RespondAsync(connection, exchangeCapture, status, "Could not reach the origin.");
@@ -206,6 +207,7 @@ public sealed class TunnelHandler(
 			(toOrigin, fromOrigin) = await TunnelRelay.RelayAsync(client, origin, options.TunnelIdleTimeout, shutdown, stopping);
 		}
 		catch (Exception ex) when (ex is not OutOfMemoryException) {
+			limits.Report("connecting to an origin", ex);
 			error = $"origin unreachable: {ex.Message}";
 		}
 		log.Write(new ExchangeRecord {

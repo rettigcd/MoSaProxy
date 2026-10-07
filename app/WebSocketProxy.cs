@@ -14,7 +14,7 @@ public sealed record WebSocketSummary(int Status, long ClientBytes, long OriginB
 /// </summary>
 /// <param name="stopping">Signalled when the proxy starts shutting down: both legs of every open connection are sent a close (1001, going away).</param>
 /// <param name="shutdown">Signalled when the drain period is over: connections that have not finished closing are aborted.</param>
-public sealed class WebSocketProxy(HttpMessageInvoker upstream, ProxyOptions options, CancellationToken stopping, CancellationToken shutdown) {
+public sealed class WebSocketProxy(HttpMessageInvoker upstream, ProxyOptions options, ResourceLimitMonitor limits, CancellationToken stopping, CancellationToken shutdown) {
 
 	const int BufferSize = 64 * 1024;
 
@@ -53,6 +53,7 @@ public sealed class WebSocketProxy(HttpMessageInvoker upstream, ProxyOptions opt
 			return await RejectAsync(context, capture, 504, "origin did not answer the WebSocket handshake in time");
 		}
 		catch (Exception ex) when (ex is WebSocketException or HttpRequestException) {
+			limits.Report("connecting a WebSocket to an origin", ex);
 			// If the origin answered with an HTTP status (for example 403 or 401), pass that on; otherwise it was unreachable.
 			int status = (int)origin.HttpStatusCode;
 			if (status is < 300 or > 599) status = 502;

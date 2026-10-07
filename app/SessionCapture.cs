@@ -52,8 +52,11 @@ public sealed class FileSessionCapture : ISessionCapture {
 	readonly long? _maxBodyBytes;
 	int _last;
 
-	public FileSessionCapture(string baseDirectory, long? maxBodyBytes = null) {
+	readonly ResourceLimitMonitor? _limits;
+
+	public FileSessionCapture(string baseDirectory, long? maxBodyBytes = null, ResourceLimitMonitor? limits = null) {
 		_maxBodyBytes = maxBodyBytes;
+		_limits = limits;
 		Directory.CreateDirectory(baseDirectory);
 		string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
 		string run = Path.Combine(baseDirectory, stamp);
@@ -66,7 +69,7 @@ public sealed class FileSessionCapture : ISessionCapture {
 
 	public IExchangeCapture BeginExchange() {
 		int number = Interlocked.Increment(ref _last);
-		return new FileExchangeCapture(RunDirectory, number, _maxBodyBytes);
+		return new FileExchangeCapture(RunDirectory, number, _maxBodyBytes, _limits);
 	}
 }
 
@@ -84,9 +87,12 @@ sealed class FileExchangeCapture : IExchangeCapture {
 	bool _messagesOpened;
 	readonly object _messagesLock = new();   // the two directions of a WebSocket write from different threads
 
-	public FileExchangeCapture(string directory, int number, long? maxBodyBytes) {
+	readonly ResourceLimitMonitor? _limits;
+
+	public FileExchangeCapture(string directory, int number, long? maxBodyBytes, ResourceLimitMonitor? limits) {
 		_directory = directory;
 		_maxBodyBytes = maxBodyBytes;
+		_limits = limits;
 		Number = number;
 		_client = Open($"{number}_c.txt");
 		_server = Open($"{number}_s.txt");
@@ -96,7 +102,11 @@ sealed class FileExchangeCapture : IExchangeCapture {
 
 	FileStream? Open(string name) {
 		try { return new FileStream(Path.Combine(_directory, name), FileMode.CreateNew, FileAccess.Write, FileShare.Read, 64 * 1024, useAsync: true); }
-		catch (Exception ex) { Console.Error.WriteLine($"Capture disabled for {name}: {ex.Message}"); return null; }
+		catch (Exception ex) {
+			Console.Error.WriteLine($"Capture disabled for {name}: {ex.Message}");
+			_limits?.Report($"creating capture file {name}", ex);
+			return null;
+		}
 	}
 
 	public void WriteRequestHead(string method, string target, string protocol, IEnumerable<KeyValuePair<string, string>> headers) =>
@@ -116,8 +126,8 @@ sealed class FileExchangeCapture : IExchangeCapture {
 		catch (Exception ex) { Fail(ref file, ex); }
 	}
 
-	public Stream TeeRequestBody(Stream source) => _requestTee = new TeeReadStream(source, _client, _maxBodyBytes);
-	public Stream TeeResponseBody(Stream source) => _responseTee = new TeeReadStream(source, _server, _maxBodyBytes);
+	public Stream TeeRequestBody(Stream source) => _requestTee = new TeeReadStream(source, _client, _maxBodyBytes, ex => _limits?.Report($"writing capture file {Number}_c.txt", ex));
+	public Stream TeeResponseBody(Stream source) => _responseTee = new TeeReadStream(source, _server, _maxBodyBytes, ex => _limits?.Report($"writing capture file {Number}_s.txt", ex));
 
 	public void WriteResponseBody(ReadOnlySpan<byte> body) {
 		if (_server is null) return;
@@ -186,11 +196,15 @@ sealed class FileExchangeCapture : IExchangeCapture {
 			meta.Save(temp);
 			File.Move(temp, final, overwrite: true);
 		}
-		catch (Exception ex) { Console.Error.WriteLine($"Capture metadata failed for exchange {Number}: {ex.Message}"); }
+		catch (Exception ex) {
+			Console.Error.WriteLine($"Capture metadata failed for exchange {Number}: {ex.Message}");
+			_limits?.Report($"saving capture metadata for exchange {Number}", ex);
+		}
 	}
 
-	static void Fail(ref FileStream? file, Exception ex) {
+	void Fail(ref FileStream? file, Exception ex) {
 		Console.Error.WriteLine($"Capture write failed: {ex.Message}");
+		_limits?.Report($"writing capture file {Path.GetFileName(file?.Name)}", ex);
 		try { file?.Dispose(); } catch { }
 		file = null;
 	}
@@ -200,7 +214,7 @@ sealed class FileExchangeCapture : IExchangeCapture {
 /// Passes reads through to <c>inner</c> and copies the bytes read into <c>sink</c>. A failing sink is dropped
 /// silently (the copy stops, the read keeps working). Copying stops after <c>maxBytes</c> and sets <see cref="Truncated"/>.
 /// </summary>
-public sealed class TeeReadStream(Stream inner, Stream? sink, long? maxBytes) : Stream {
+public sealed class TeeReadStream(Stream inner, Stream? sink, long? maxBytes, Action<Exception>? onSinkFailure = null) : Stream {
 	long _copied;
 	bool _sinkFailed;
 
@@ -219,7 +233,10 @@ public sealed class TeeReadStream(Stream inner, Stream? sink, long? maxBytes) : 
 				_copied += chunk.Length;
 			}
 			catch (OperationCanceledException) { throw; }
-			catch { _sinkFailed = true; }
+			catch (Exception ex) {
+				_sinkFailed = true;
+				onSinkFailure?.Invoke(ex);
+			}
 		}
 		return n;
 	}

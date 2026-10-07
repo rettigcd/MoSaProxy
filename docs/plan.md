@@ -298,7 +298,24 @@ Original scope for reference:
   `ProxyHost.WaitForStopRequestAsync` is used instead, and `StopAsync` does the draining. Verified with the test suite and
   with a real process receiving a real console interrupt (one interrupt: the in-flight request completed and the archive
   was written; two: the 30 s drain was skipped and the request aborted).
-- Request and connection limits: **to be discussed** (what to cap, and what the defaults should be).
+- **Safety limits *(decided and done)*:** the decision was: no new caps (the log, the capture folder, connections, tunnels
+  and WebSockets may grow without bound), the proxy is not there to protect the machine, but when a real limit is hit it
+  must say which limit and stop rather than carry on while quietly losing data.
+  `ResourceLimits.Describe` recognizes the limits that mean the system ran out of something: a full disk
+  (`ERROR_DISK_FULL`/`ERROR_HANDLE_DISK_FULL`, "No space left on device"), too many open files, running out of memory, and
+  running out of sockets or network buffers; it also looks through wrapping exceptions. `ResourceLimitMonitor` is told
+  from the places that used to swallow these errors (a log sink failing, any capture file or body write, creating a
+  capture file, saving capture metadata, connecting to an origin or WebSocket, forwarding a request). It prints the first
+  limit once, as `Limit reached: <limit> (while <what was being done>).`, and completes a task that the program waits on
+  beside the Ctrl+C wait. On a limit the program stops at once with no drain period (it can no longer record what passes
+  through), still tries to write the `--saz` archive, prints `Stopped because a limit was reached: ...`, and exits with
+  code 2. Ordinary errors (a locked file, a permission error, an unreachable origin) are not limits and behave as before.
+  What was *not* changed: the existing explicit settings (`--capture-max-body`, the upstream, connect and idle timeouts, the
+  drain period) are options with their own documented behaviour, not "limits hit".
+  Tested in layers (classification including wrapped exceptions, once-only reporting, every failure point feeding the
+  monitor, and a real proxy whose log fails mid-request: the request still succeeds and the monitor is told). A real full
+  disk could not be reproduced on the development machine, so the stop-and-exit-code step in `Program.cs` has not been
+  seen end to end.
 - **`.saz` export *(done, not yet opened in Fiddler)*:** `SazExporter` packs a capture run folder into a `.saz` (a zip).
   `--export-saz RUN_DIR [FILE]` converts an existing folder (default output: the folder path plus `.saz`), and `--saz`
   (with `--capture`) writes the archive for the run when the proxy stops.
