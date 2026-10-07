@@ -15,7 +15,7 @@ Add new rules to this file as they come up; follow everything here when writing 
 
 - xUnit for the test framework.
 - Shouldly for assertions (`result.ShouldBe(...)`). Do not use `Assert.*`.
-- Tests live in `test/MoSaProxy.Tests/`. Mirror the structure of the code under test where practical.
+- Tests for Core live in `test/MoSaProxy.Core.Tests/`, which references only `MoSaProxy.Core`. Tests for the console app (UI types) live in `test/MoSaProxy.App.Tests/`; each future UI gets its own test project. Mirror the structure of the code under test where practical.
 
 ## Structure: Given / When / Then
 

@@ -1,6 +1,6 @@
 # MoSaProxy
 
-A traffic-logging HTTP/HTTPS proxy in C# (.NET). The proxy engine is the `core/` library (`MoSaProxy.Core`); the console app is in `app/` and references it. Tests are in `test/MoSaProxy.Tests/`.
+A traffic-logging HTTP/HTTPS proxy in C# (.NET). The proxy engine is the `core/` library (`MoSaProxy.Core`); the console app is in `app/` and references it. Tests for Core are in `test/MoSaProxy.Core.Tests/` (it references only `MoSaProxy.Core`); tests for the console app's UI types are in `test/MoSaProxy.App.Tests/`.
 
 - Read [docs/plan.md](docs/plan.md) for the roadmap and design decisions, including the testing approach.
 - [docs/landscape.md](docs/landscape.md) lists the competing proxy servers, the features they offer and the save formats wanted.

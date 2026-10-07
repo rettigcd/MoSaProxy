@@ -307,11 +307,9 @@ public class ResourceLimit_Tests {
 	[Fact]
 	public async Task Proxy_LogWriteHitsALimitMidRequest_MonitorIsToldAndTheRequestStillSucceeds() {
 
-		// Given: a proxy whose log fails with "disk full" (like a full disk under a log file), and a monitor wired to it as the program does
+		// Given: a proxy whose log fails with "disk full" (like a full disk under a log file), and a monitor wired to it
 		await using var origin = await TestOrigin.StartAsync(c => c.Response.WriteAsync("hello"));
-		var output = new StringWriter();
 		var monitor = new ResourceLimitMonitor();
-		_ = new ResourceLimitConsoleReporter(monitor, new ColorConsole(output));   // the console front end, as in the program
 		var log = new CompositeExchangeLog(new IExchangeLog[] { new FailingLog(DiskFull()) }, ex => monitor.Report("writing the log", ex));
 		var originalError = Console.Error;
 		Console.SetError(new StringWriter());
@@ -326,7 +324,6 @@ public class ResourceLimit_Tests {
 			text.ShouldBe("hello");
 			var reached = await monitor.WhenReached.WaitAsync(TimeSpan.FromSeconds(5));
 			reached.ShouldBe("the disk is full (while writing the log)");
-			output.ToString().ShouldContain("Limit reached: the disk is full (while writing the log).");
 		}
 		finally {
 			Console.SetError(originalError);

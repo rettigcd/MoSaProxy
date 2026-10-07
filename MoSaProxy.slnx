@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/test/">
-    <Project Path="test/MoSaProxy.Tests/MoSaProxy.Tests.csproj" />
+    <Project Path="test/MoSaProxy.Core.Tests/MoSaProxy.Core.Tests.csproj" />
+    <Project Path="test/MoSaProxy.App.Tests/MoSaProxy.App.Tests.csproj" />
   </Folder>
   <Project Path="app/MoSaProxy.csproj" />
   <Project Path="core/MoSaProxy.Core.csproj" />

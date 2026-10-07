@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -21,6 +21,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\app\MoSaProxy.csproj" />
+    <ProjectReference Include="..\..\core\MoSaProxy.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\MoSaProxy.Core.Tests\TempFolder.cs" Link="TempFolder.cs" />
+    <Compile Include="..\MoSaProxy.Core.Tests\FakeRootStore.cs" Link="FakeRootStore.cs" />
   </ItemGroup>
 
 </Project>

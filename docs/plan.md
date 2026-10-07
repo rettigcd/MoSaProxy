@@ -9,7 +9,7 @@ Browsers and other clients are pointed at it with a normal proxy setting
 See also [landscape.md](landscape.md): the other proxy servers, the features they offer, and the save formats wanted.
 
 **Naming.** The project is **MoSaProxy** (it was called "mos" until it was renamed): the solution `MoSaProxy.slnx`, the program
-`app/MoSaProxy.csproj` (`MoSaProxy.exe`), the tests `test/MoSaProxy.Tests`, the `MoSaProxy` namespace, and the `x-mosaproxy-*`
+`app/MoSaProxy.csproj` (`MoSaProxy.exe`), the tests `test/MoSaProxy.Core.Tests`, the `MoSaProxy` namespace, and the `x-mosaproxy-*`
 flags in exported `.saz` files. Three identifiers that exist outside the code deliberately still say "mos", so that the root
 certificate that may already be installed as trusted on a machine keeps being recognized: the certificate's subject
 (`CN=mos Proxy Root CA (local test CA), O=mos`), its file names (`mos-root-ca.pfx` and `.cer`), and its default folder
@@ -157,7 +157,7 @@ a Core service for the orchestration every front end would repeat; one exporter 
 
 ## Testing approach
 
-- **Long-term functionality is tested in the test project** (`test/MoSaProxy.Tests`). When implementing any phase,
+- **Long-term functionality is tested in the test project** (`test/MoSaProxy.Core.Tests`). When implementing any phase,
   add tests there as part of the work and run them with `dotnet test` from the repo root. A phase is not done
   until its tests are in the test project and passing.
 - **Short-term spikes are exempt.** Throwaway experiments (e.g. the Phase 3 Kestrel-vs-`SslStream` spike)
