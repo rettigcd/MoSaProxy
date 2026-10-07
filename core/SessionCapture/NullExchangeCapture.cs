@@ -22,7 +22,9 @@ public interface IExchangeCapture {
 	/// Supplies the exact bytes the client sent and the origin answered, when they are known (HTTP/1.x). They replace the
 	/// request and response files that were built from parsed data. Call before <see cref="Complete"/>; either may be null.
 	/// </summary>
-	void SetWireBytes(byte[]? request, byte[]? response);
+	/// <param name="requestSource">What the request bytes are: <see cref="CaptureSource.Wire"/> or <see cref="CaptureSource.Http2Decoded"/>.</param>
+	/// <param name="responseSource">What the response bytes are, likewise.</param>
+	void SetWireBytes(byte[]? request, byte[]? response, string requestSource = CaptureSource.Wire, string responseSource = CaptureSource.Wire);
 	/// <summary>
 	/// Says that <see cref="SetWireBytes"/> will supply the request and/or the response, so the file need not be written while the
 	/// exchange runs (it would only be overwritten). Call before the matching head is written. If the bytes then do not arrive, the
@@ -42,7 +44,7 @@ public sealed class NullExchangeCapture : IExchangeCapture {
 	public Stream TeeResponseBody(Stream source) => source;
 	public void WriteResponseBody(ReadOnlySpan<byte> body) { }
 	public void WriteWebSocketMessage(bool fromClient, System.Net.WebSockets.WebSocketMessageType type, ReadOnlySpan<byte> payload, long totalBytes, string? note = null) { }
-	public void SetWireBytes(byte[]? request, byte[]? response) { }
+	public void SetWireBytes(byte[]? request, byte[]? response, string requestSource = CaptureSource.Wire, string responseSource = CaptureSource.Wire) { }
 	public void ExpectWireBytes(bool request = false, bool response = false) { }
 	public void Complete(ExchangeRecord record) { }
 }

@@ -19,6 +19,7 @@ sealed class FileExchangeCapture : IExchangeCapture {
 
 	readonly ResourceLimitMonitor? _limits;
 	bool _responseGenerated;
+	string _requestSource = CaptureSource.Wire, _responseSource = CaptureSource.Wire;
 	bool _expectWireRequest, _expectWireResponse;   // the file will be written from the wire bytes at the end, not while the exchange runs
 	byte[]? _requestHead, _responseHead;             // kept in case the wire bytes do not arrive
 	byte[]? _wireRequest, _wireResponse;     // the exact bytes, when known; they replace the files built from parsed data
@@ -108,9 +109,11 @@ sealed class FileExchangeCapture : IExchangeCapture {
 		}
 	}
 
-	public void SetWireBytes(byte[]? request, byte[]? response) {
+	public void SetWireBytes(byte[]? request, byte[]? response, string requestSource = CaptureSource.Wire, string responseSource = CaptureSource.Wire) {
 		_wireRequest = request;
 		_wireResponse = response;
+		_requestSource = requestSource;
+		_responseSource = responseSource;
 	}
 
 	/// <summary>
@@ -174,8 +177,8 @@ sealed class FileExchangeCapture : IExchangeCapture {
 				new XElement("Status", record.Status?.ToString() ?? ""),
 				new XElement("RequestBytes", record.RequestBytes),
 				new XElement("ResponseBytes", record.ResponseBytes),
-				new XElement("RequestSource", requestFromWire ? CaptureSource.Wire : CaptureSource.Parsed),
-				new XElement("ResponseSource", responseFromWire ? CaptureSource.Wire : _responseGenerated ? CaptureSource.Generated : CaptureSource.Parsed),
+				new XElement("RequestSource", requestFromWire ? _requestSource : CaptureSource.Parsed),
+				new XElement("ResponseSource", responseFromWire ? _responseSource : _responseGenerated ? CaptureSource.Generated : CaptureSource.Parsed),
 				new XElement("RequestBodyTruncated", requestBodyMissing || ((_wireRequest is null ? _requestTee?.Truncated : requestTruncated) ?? false)),
 				new XElement("ResponseBodyTruncated", responseBodyMissing || ((_wireResponse is null ? _responseTee?.Truncated : responseTruncated) ?? false)),
 				new XElement("DurationMs", Math.Round(record.DurationMs, 1)),

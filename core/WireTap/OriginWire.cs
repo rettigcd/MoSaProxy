@@ -4,7 +4,7 @@ namespace MoSaProxy;
 /// The bytes an origin sent on one proxy-to-origin connection (after TLS), exactly as they arrived, split into one response per
 /// request. An HTTP/1.1 connection carries one request at a time, so the n-th response answers the n-th request written to it.
 /// </summary>
-sealed class OriginWire(ResourceLimitMonitor limits) {
+sealed class OriginWire(ResourceLimitMonitor limits) : IOriginTap {
 	readonly object _lock = new();
 	readonly WireBuffer _fromOrigin = new();
 	readonly List<ExchangeWire> _requesters = new();
@@ -12,7 +12,7 @@ sealed class OriginWire(ResourceLimitMonitor limits) {
 	bool _stopped;
 
 	/// <summary>Called when bytes are written to the origin, with the exchange that is current at that moment (if any).</summary>
-	internal void Wrote(ExchangeWire? exchange) {
+	public void Wrote(ExchangeWire? exchange, ReadOnlySpan<byte> bytes) {
 		lock (_lock) {
 			if (_stopped) return;
 			if (exchange is null) {
@@ -27,7 +27,9 @@ sealed class OriginWire(ResourceLimitMonitor limits) {
 		}
 	}
 
-	internal void Received(ReadOnlySpan<byte> bytes) {
+	public void Closed() { }
+
+	public void Received(ReadOnlySpan<byte> bytes) {
 		lock (_lock) {
 			if (_stopped) return;
 			try { _fromOrigin.Append(bytes); }

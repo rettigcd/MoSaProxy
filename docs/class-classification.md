@@ -23,13 +23,13 @@ A class is placed by its main focus. A line or two of console output inside an o
 
 | Category | Types |
 |---|---|
-| Core | 47 |
+| Core | 54 |
 | UI | 15 |
 | Mix | 0 |
 | Other | 0 |
-| **Total** | **62** (61 declared types, plus the `Program` class the compiler generates) |
+| **Total** | **69** (68 declared types, plus the `Program` class the compiler generates) |
 
-## Core (47)
+## Core (54)
 
 | Type | Kind | File | Why |
 |---|---|---|---|
@@ -68,6 +68,13 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `SazExporter.Exchange` | nested record | `SazExporter/SazExporter.cs` | One exchange's metadata as read back for the export. |
 | `SazExporter.IndexRow` | nested record | `SazExporter/SazExporter.cs` | One row of the archive's `_index.htm`. |
 | `CaptureSource` | static class | `SessionCapture/CaptureSource.cs` | The names recorded in an exchange's metadata for where a capture file came from: `wire`, `http2-decoded`, `parsed`, `generated`. |
+| `HpackDecoder` | internal class | `Http2/HpackDecoder.cs` | Decodes HTTP/2 header blocks (HPACK), keeping the dynamic table for one direction of a connection. |
+| `HpackHuffman` | internal static class | `Http2/HpackHuffman.cs` | The HPACK Huffman code table and its decoder. |
+| `HpackStaticTable` | internal static class | `Http2/HpackStaticTable.cs` | The HPACK static table of 61 common header fields. |
+| `Http2Direction` | internal class | `Http2/Http2Direction.cs` | Follows the frames of one direction of an HTTP/2 connection and keeps each stream's decoded headers and body until claimed. |
+| `Http2Stream` | internal class | `Http2/Http2Stream.cs` | What one direction carried for one stream: header blocks and body. |
+| `Http2Rendering` | internal static class | `Http2/Http2Rendering.cs` | Writes an HTTP/2 request or response as HTTP/1.1-style text from its decoded headers and body. |
+| `Http2OriginWire` | internal class | `Http2/Http2OriginWire.cs` | Both directions of one proxy-to-origin HTTP/2 connection; finds an exchange's response by its method, authority and path. |
 | `WireTaps` | class | `WireTap/WireTaps.cs` | Records the bytes that cross the wire on HTTP/1.x connections: a connection middleware for what clients send, and a stream filter for what origins send. |
 | `ConnectionWire` | class | `WireTap/ConnectionWire.cs` | The bytes one client connection sent, split into requests, so each exchange can take its exact request. |
 | `OriginWire` | internal class | `WireTap/OriginWire.cs` | The bytes one origin connection sent, split into responses, matched to the exchanges that asked for them. |
@@ -121,6 +128,7 @@ Listed so the picture is complete.
 | `IExchangeLog` | interface | `ExchangeLog/ExchangeRecord.cs` | Core |
 | `ISessionCapture` | interface | `SessionCapture/NullSessionCapture.cs` | Core |
 | `IExchangeCapture` | interface | `SessionCapture/NullExchangeCapture.cs` | Core |
+| `IOriginTap` | interface | `WireTap/IOriginTap.cs` | Core |
 | `IRootStore` | interface | `RootTrust.cs` | Core |
 | `RootTrustState` | enum | `RootTrust.cs` | Core |
 

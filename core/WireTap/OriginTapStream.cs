@@ -4,7 +4,7 @@ namespace MoSaProxy;
 /// Wraps the plain-text stream of one proxy-to-origin connection (after TLS) and records what the origin sends, noting which
 /// exchange each request write belongs to. Everything passes through unchanged.
 /// </summary>
-sealed class OriginTapStream(Stream inner, OriginWire wire) : Stream {
+sealed class OriginTapStream(Stream inner, IOriginTap wire) : Stream {
 	public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) {
 		int n = await inner.ReadAsync(buffer, cancellationToken);
 		wire.Received(buffer.Span[..n]);
@@ -21,12 +21,12 @@ sealed class OriginTapStream(Stream inner, OriginWire wire) : Stream {
 		ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
 
 	public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) {
-		wire.Wrote(ExchangeWire.Current.Value);
+		wire.Wrote(ExchangeWire.Current.Value, buffer.Span);
 		return inner.WriteAsync(buffer, cancellationToken);
 	}
 
 	public override void Write(byte[] buffer, int offset, int count) {
-		wire.Wrote(ExchangeWire.Current.Value);
+		wire.Wrote(ExchangeWire.Current.Value, buffer.AsSpan(offset, count));
 		inner.Write(buffer, offset, count);
 	}
 
@@ -44,9 +44,12 @@ sealed class OriginTapStream(Stream inner, OriginWire wire) : Stream {
 	public override void SetLength(long value) => throw new NotSupportedException();
 
 	protected override void Dispose(bool disposing) {
-		if (disposing) inner.Dispose();
+		if (disposing) { wire.Closed(); inner.Dispose(); }
 		base.Dispose(disposing);
 	}
 
-	public override ValueTask DisposeAsync() => inner.DisposeAsync();
+	public override ValueTask DisposeAsync() {
+		wire.Closed();
+		return inner.DisposeAsync();
+	}
 }

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using Microsoft.AspNetCore.Connections.Features;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Server.Kestrel.Core.Features;
 using Microsoft.AspNetCore.WebUtilities;
 
 namespace MoSaProxy;
@@ -69,6 +70,8 @@ public sealed class ProxyHandler : IDisposable {
 		var counted = new CountingStream(request.Body);
 		var connectionWire = _wireTaps?.ForConnection(context.Connection.Id);
 		ExchangeWire? exchangeWire = null;
+		bool http2 = HttpProtocol.IsHttp2(request.Protocol);
+		int? streamId = http2 ? context.Features.Get<IHttp2StreamIdFeature>()?.StreamId : null;
 		long responseBytes = 0;
 		string mode = interceptBase is null ? "plain" : "intercept";
 		string? error = null;
@@ -102,7 +105,8 @@ public sealed class ProxyHandler : IDisposable {
 
 		try {
 			// The exact request is read back from the connection's bytes when the exchange ends, so the file need not be written now.
-			if (connectionWire is not null && !isWebSocket && !HttpProtocol.IsHttp2(request.Protocol)) capture.ExpectWireBytes(request: true);
+			if (connectionWire is not null && !isWebSocket && (http2 ? streamId is not null && connectionWire.IsHttp2 : !connectionWire.IsHttp2))
+				capture.ExpectWireBytes(request: true);
 			capture.WriteRequestHead(request.Method, rawTarget, request.Protocol,
 				request.Headers.Select(h => KeyValuePair.Create(h.Key, h.Value.ToString())));
 
@@ -110,7 +114,9 @@ public sealed class ProxyHandler : IDisposable {
 				// A WebSocket connection (an HTTP/1.1 upgrade, or HTTP/2 extended CONNECT) lives for as long as the client keeps it.
 				// The handshake is logged as soon as it succeeds, and a second record with the totals when the connection closes.
 				mode = "websocket";
-				connectionWire?.StopRecording();      // from here the connection carries WebSocket frames, not HTTP messages
+				// From here an HTTP/1.1 connection carries WebSocket frames, not HTTP messages; over HTTP/2 only this stream does.
+				if (streamId is { } wsStream) connectionWire?.IgnoreHttp2Stream(wsStream);
+				else connectionWire?.StopRecording();
 				var summary = await _webSockets.RunAsync(context, capture, uri!, () => _log.Write(MakeRecord("websocket", 101, 0, 0, null)));
 				mode = summary.Status == 101 ? "websocket-closed" : "rejected";
 				statusOverride = summary.Status == 0 ? null : summary.Status;
@@ -159,7 +165,11 @@ public sealed class ProxyHandler : IDisposable {
 			var record = MakeRecord(mode, nothingSent ? null : statusOverride ?? context.Response.StatusCode, requestBytesOverride ?? counted.BytesRead, responseBytes, error);
 			_log.Write(record);
 			if (connectionWire is not null && !isWebSocket) {
-				try { capture.SetWireBytes(connectionWire.TakeNextRequest(), exchangeWire?.TakeResponse()); }
+				try {
+					var rawRequest = streamId is { } id ? connectionWire.TakeHttp2Request(id) : connectionWire.TakeNextRequest();
+					var rawResponse = exchangeWire?.TakeResponse();
+					capture.SetWireBytes(rawRequest, rawResponse?.Bytes, streamId is null ? CaptureSource.Wire : CaptureSource.Http2Decoded, rawResponse?.Source ?? CaptureSource.Wire);
+				}
 				catch (Exception ex) when (ex is not OutOfMemoryException) { Console.Error.WriteLine($"Wire capture failed: {ex.Message}"); }
 			}
 			capture.Complete(record);
@@ -194,7 +204,7 @@ public sealed class ProxyHandler : IDisposable {
 		ExchangeWire? wireForExchange = null;
 		if (_wireTaps is not null) {
 			// The tap on the origin connection reads this to learn which exchange a request belongs to (see ExchangeWire).
-			wireForExchange = new ExchangeWire(request.Method);
+			wireForExchange = new ExchangeWire(_wireTaps, request.Method, uri.Authority, uri.PathAndQuery);
 			wireForExchange.MakeCurrent();
 			reportWire(wireForExchange);
 		}
@@ -202,7 +212,8 @@ public sealed class ProxyHandler : IDisposable {
 		timeout.CancelAfter(Timeout.InfiniteTimeSpan);
 		reportOriginVersion(HttpVersions.Format(response.Version));
 
-		if (wireForExchange?.Origin is not null) capture.ExpectWireBytes(response: true);   // the exact response is read back from the origin connection's bytes
+		// The response is read back from the origin connection's bytes (HTTP/1.x) or frames (HTTP/2) when the exchange ends.
+		if (wireForExchange is not null && (wireForExchange.Origin is not null || response.Version.Major == 2)) capture.ExpectWireBytes(response: true);
 
 		// The origin's response, as the origin sent it (before the proxy drops hop-by-hop headers).
 		// HTTP/2 has no reason phrase, so the standard one for the status code is written (as a text capture of HTTP/2 conventionally shows it).

@@ -23,7 +23,23 @@ public sealed class WireTaps(ResourceLimitMonitor limits) {
 		finally { _connections.TryRemove(connection.ConnectionId, out _); }
 	}
 
-	/// <summary>Wraps the plain-text stream of a connection to an origin. HTTP/2 connections are left alone: they are not HTTP/1.x text.</summary>
-	internal Stream TapOrigin(SocketsHttpPlaintextStreamFilterContext context) =>
-		context.NegotiatedHttpVersion.Major == 1 ? new OriginTapStream(context.PlaintextStream, new OriginWire(limits)) : context.PlaintextStream;
+	readonly ConcurrentDictionary<Http2OriginWire, byte> _http2Origins = new();
+
+	/// <summary>Wraps the plain-text stream of a connection to an origin, whether it carries HTTP/1.x or HTTP/2.</summary>
+	internal Stream TapOrigin(SocketsHttpPlaintextStreamFilterContext context) {
+		if (context.NegotiatedHttpVersion.Major == 1) return new OriginTapStream(context.PlaintextStream, new OriginWire(limits));
+		var wire = new Http2OriginWire(limits);
+		_http2Origins[wire] = 0;
+		return new OriginTapStream(context.PlaintextStream, wire);
+	}
+
+	/// <summary>Finds an HTTP/2 origin connection that carried this request and takes its response as HTTP/1.1-style text, or null.</summary>
+	internal byte[]? TakeHttp2Response(string method, string authority, string pathAndQuery) {
+		foreach (var (wire, _) in _http2Origins) {
+			if (wire.TakeResponse(method, authority, pathAndQuery) is { } response) return response;
+			// A connection that has been closed for a while and holds nothing, or nobody came for what it holds, is forgotten.
+			if (wire.ClosedAt is { } closed && (wire.IsEmpty || DateTime.UtcNow - closed > TimeSpan.FromMinutes(1))) _http2Origins.TryRemove(wire, out _);
+		}
+		return null;
+	}
 }

@@ -18,7 +18,7 @@ folder itself is still named `mos` on disk.
 
 ## Where we are
 
-Phases 1 to 5 are done (see below), Phase 6 is under way (HTTP/1.1 byte-exact capture is built; HTTP/2 is not), and 295 tests pass. MoSaProxy is a loopback-only forward proxy on Kestrel:
+Phases 1 to 5 are done (see below), Phase 6 is built for HTTP/1.1 (exact bytes) and HTTP/2 (decoded from the frames), and 303 tests pass. MoSaProxy is a loopback-only forward proxy on Kestrel:
 
 - HTTP/1.1 and HTTP/2, on both sides of the proxy.
 - HTTPS as blind tunnels or with TLS interception (a local root CA, with an offer at startup to trust it).
@@ -29,7 +29,7 @@ Phases 1 to 5 are done (see below), Phase 6 is under way (HTTP/1.1 byte-exact ca
 The code is a `core/` library (`MoSaProxy.Core`) plus the console program in `app/`; see
 [class-classification.md](class-classification.md). Tests are in two projects: `test/MoSaProxy.Core.Tests` and `test/MoSaProxy.App.Tests`.
 
-What is not done: byte-exact capture for HTTP/2 (Phase 6; those files are still rebuilt from what Kestrel and `HttpClient` parsed), opening an
+What is not done: opening an
 exported `.saz` in Fiddler to confirm it loads, HAR and mitmproxy flow export, and removing the console diagnostics from Core.
 
 ## Key design decisions
@@ -454,6 +454,16 @@ when the exchange ends. If the bytes never arrive, the file gets the kept head a
 `ResponseBodyTruncated` say the body was not saved (the source is then `parsed`). Exchanges with nothing expected, such as
 HTTP/2, are still written as they run.
 
+**HTTP/2 (built).** `ConnectionWire` follows the client's frames once it sees the HTTP/2 preface, and `Http2OriginWire` follows both directions
+of a proxy-to-origin HTTP/2 connection (`core/Http2/`). Every header block is HPACK-decoded in order (`HpackDecoder`, with the
+Huffman table of RFC 7541; checked against the RFC's own examples). A client request is found by its stream id
+(`IHttp2StreamIdFeature`). An origin response is found by the method, `:authority` and `:path` of the requests the connection carried,
+because the two legs' stream ids differ; of several identical concurrent requests, the lowest stream id goes first. Each is written as
+HTTP/1.1-style text (`GET /path HTTP/2`, a `Host` line, then the headers in the order sent, lower case, then the body) and labelled
+`http2-decoded`. Streams that are not ordinary exchanges (an HTTP/2 `CONNECT`, which is how WebSockets run) are dropped. Trailers
+and `PUSH_PROMISE` are not supported (a push makes the direction give up and fall back to the `parsed` files). Tests: `HpackDecoder_Tests`,
+`Http2Capture_Tests`, `CaptureSource_Tests`.
+
 Known gaps: the `CONNECT` exchange's own `_c`/`_s` are still rebuilt; a request that Kestrel rejects (400) is not an
 exchange, so its bytes are not saved as one; the wire bytes are held in memory until the exchange ends; not yet checked against a packet capture or opened in Fiddler.
 
@@ -486,6 +496,6 @@ Fiddler output for a sample session.
 4. Phase 3 spike on the Kestrel / `SslStream` question, then the implementation. *(done)*
 5. Phase 4. *(done)*
 6. Phase 5 items, including the `.saz` writer. *(done, except the items dropped)*
-7. Phase 6: byte-exact capture. The spike chose option A (a wire tap). HTTP/1.1 is built *(done)*; HTTP/2 with HPACK decoding is *next*.
+7. Phase 6: byte-exact capture. The spike chose option A (a wire tap). HTTP/1.1 *(done)*; HTTP/2 with HPACK decoding *(done)*; the smaller gaps and checking against Fiddler remain.
 8. Then, in no fixed order: HAR and mitmproxy flow export in Core, the Core cleanup (diagnostics events, a shared session
    runner), and confirming an exported `.saz` opens in Fiddler.

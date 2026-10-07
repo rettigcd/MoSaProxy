@@ -21,7 +21,10 @@ public class CaptureSource_Tests {
 	static async Task<XElement> MetadataAsync(TestProxy proxy, int number) {
 		string path = Path.Combine(proxy.CaptureRunDirectory!, $"{number}_m.xml");
 		await TempFolder.WaitForFileAsync(path);
-		return XDocument.Load(path).Root!;
+		for (int attempt = 0; ; attempt++) {
+			try { return XDocument.Load(path).Root!; }
+			catch (IOException) when (attempt < 50) { await Task.Delay(20); }   // the file can still be held for a moment right after it appears
+		}
 	}
 
 	/// <summary>Sends one request line plus headers on a new connection and waits for the proxy to answer.</summary>
@@ -52,7 +55,7 @@ public class CaptureSource_Tests {
 	}
 
 	[Fact]
-	public async Task Http2Exchange_BothFilesAreParsed() {
+	public async Task Http2Exchange_BothFilesAreDecodedFromTheFrames() {
 
 		// Given: an HTTP/2 origin and an intercepting, capturing proxy
 		using var folder = new TempFolder();
@@ -63,10 +66,10 @@ public class CaptureSource_Tests {
 		// When: a client requests a page over HTTP/2
 		(await proxy.Http2Client.GetAsync(origin.UrlFor("/h2"))).Version.ShouldBe(HttpVersion.Version20);
 
-		// Then: the files were written from parsed data (exchange 2; exchange 1 is the CONNECT)
+		// Then: both files were decoded from the HTTP/2 frames (exchange 2; exchange 1 is the CONNECT)
 		var meta = await MetadataAsync(proxy, 2);
-		meta.Element("RequestSource")!.Value.ShouldBe(CaptureSource.Parsed);
-		meta.Element("ResponseSource")!.Value.ShouldBe(CaptureSource.Parsed);
+		meta.Element("RequestSource")!.Value.ShouldBe(CaptureSource.Http2Decoded);
+		meta.Element("ResponseSource")!.Value.ShouldBe(CaptureSource.Http2Decoded);
 	}
 
 	[Fact]
@@ -109,7 +112,7 @@ public class CaptureSource_Tests {
 
 		// Then: the session has x-mosaproxy-request-source and x-mosaproxy-response-source flags saying "wire"
 		using var zip = ZipFile.OpenRead(saz);
-		using var stream = zip.GetEntry("raw/1_m.xml")!.Open();
+		using var stream = zip.GetEntry("raw/1_m.xml")!.Open();   // (the metadata is complete: Export read it from the finished run folder)
 		var flags = XDocument.Load(stream).Root!.Element("SessionFlags")!.Elements("SessionFlag").ToDictionary(f => f.Attribute("N")!.Value, f => f.Attribute("V")!.Value);
 		flags["x-mosaproxy-request-source"].ShouldBe(CaptureSource.Wire);
 		flags["x-mosaproxy-response-source"].ShouldBe(CaptureSource.Wire);
