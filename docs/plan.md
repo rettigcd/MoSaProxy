@@ -315,9 +315,11 @@ Original scope for reference:
   (`ERROR_DISK_FULL`/`ERROR_HANDLE_DISK_FULL`, "No space left on device"), too many open files, running out of memory, and
   running out of sockets or network buffers; it also looks through wrapping exceptions. `ResourceLimitMonitor` is told
   from the places that used to swallow these errors (a log sink failing, any capture file or body write, creating a
-  capture file, saving capture metadata, connecting to an origin or WebSocket, forwarding a request). It prints the first
-  limit once, as `Limit reached: <limit> (while <what was being done>).`, and completes a task that the program waits on
-  beside the Ctrl+C wait. On a limit the program stops at once with no drain period (it can no longer record what passes
+  capture file, saving capture metadata, connecting to an origin or WebSocket, forwarding a request). For the first limit it
+  raises its `LimitReached` event once (a failing subscriber is ignored, so it cannot break the code that hit the limit)
+  and completes a task that the program waits on beside the Ctrl+C wait. The monitor prints nothing itself:
+  `ResourceLimitConsoleReporter` subscribes to the event and prints `Limit reached: <limit> (while <what was being done>).`
+  in red. On a limit the program stops at once with no drain period (it can no longer record what passes
   through), still tries to write the `--saz` archive, prints `Stopped because a limit was reached: ...`, and exits with
   code 2. Ordinary errors (a locked file, a permission error, an unreachable origin) are not limits and behave as before.
   What was *not* changed: the existing explicit settings (`--capture-max-body`, the upstream, connect and idle timeouts, the

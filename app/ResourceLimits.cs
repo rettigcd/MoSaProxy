@@ -34,12 +34,21 @@ public static class ResourceLimits {
 }
 
 /// <summary>
-/// Notices when a limit has been hit. The first one is reported on the console, in words, and remembered; the program then
-/// stops (see <see cref="WhenReached"/>). Ordinary errors are ignored here: <see cref="Report"/> says whether it was a limit.
+/// Notices when a limit has been hit and remembers the first one. It prints nothing itself: it raises <see cref="LimitReached"/>
+/// (a console front end subscribes and prints, see <see cref="ResourceLimitConsoleReporter"/>) and completes
+/// <see cref="WhenReached"/>, which the program waits on in order to stop. Ordinary errors are ignored here:
+/// <see cref="Report"/> says whether it was a limit.
 /// </summary>
-public sealed class ResourceLimitMonitor(ColorConsole? console = null, Func<Exception, string?>? classify = null) {
+public sealed class ResourceLimitMonitor(Func<Exception, string?>? classify = null) {
 	readonly TaskCompletionSource<string> _reached = new(TaskCreationOptions.RunContinuationsAsynchronously);
 	readonly Func<Exception, string?> _classify = classify ?? ResourceLimits.Describe;
+
+	/// <summary>
+	/// Raised once, for the first limit that is hit, with the description ("the disk is full (while writing capture file 12_s.txt)").
+	/// It runs on the thread that hit the limit, so a handler should be quick. A handler that throws is ignored: it must not
+	/// break the code that was already failing.
+	/// </summary>
+	public event Action<string>? LimitReached;
 
 	/// <summary>Completes, with the description, when the first limit is hit. Never completes if none is.</summary>
 	public Task<string> WhenReached => _reached.Task;
@@ -48,8 +57,8 @@ public sealed class ResourceLimitMonitor(ColorConsole? console = null, Func<Exce
 	public string? Reached => _reached.Task.IsCompletedSuccessfully ? _reached.Task.Result : null;
 
 	/// <summary>
-	/// Call this from a place that failed. If the failure means a limit was hit, it is reported (once) and true is returned;
-	/// otherwise nothing happens and false is returned.
+	/// Call this from a place that failed. If the failure means a limit was hit, it is recorded (and <see cref="LimitReached"/>
+	/// raised, once) and true is returned; otherwise nothing happens and false is returned.
 	/// </summary>
 	/// <param name="whileDoing">What was being done, for the message: "writing capture file 12_s.txt".</param>
 	public bool Report(string whileDoing, Exception exception) {
@@ -57,8 +66,16 @@ public sealed class ResourceLimitMonitor(ColorConsole? console = null, Func<Exce
 		if (limit is null) return false;
 
 		string message = $"{limit} (while {whileDoing})";
-		if (_reached.TrySetResult(message))
-			(console ?? ColorConsole.Default).WriteLine($"{Fg.Red}Limit reached: {message}.{Fg.Restore}");
+		if (_reached.TrySetResult(message)) RaiseLimitReached(message);
 		return true;
+	}
+
+	void RaiseLimitReached(string message) {
+		var handlers = LimitReached;
+		if (handlers is null) return;
+		foreach (var handler in handlers.GetInvocationList().Cast<Action<string>>()) {
+			try { handler(message); }
+			catch { /* a failing subscriber must not break the code that hit the limit */ }
+		}
 	}
 }

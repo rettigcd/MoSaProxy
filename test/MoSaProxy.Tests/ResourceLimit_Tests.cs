@@ -108,45 +108,97 @@ public class ResourceLimit_Tests {
 	[Fact]
 	public void Report_OrdinaryError_IsIgnored() {
 
-		// Given: a monitor writing to an in-memory console
-		var output = new StringWriter();
-		var monitor = new ResourceLimitMonitor(new ColorConsole(output));
+		// Given: a monitor with a subscriber to its LimitReached event
+		var monitor = new ResourceLimitMonitor();
+		var raised = new List<string>();
+		monitor.LimitReached += raised.Add;
 
 		// When: an ordinary error is reported
 		var wasLimit = monitor.Report("writing a file", new UnauthorizedAccessException("denied"));
 
-		// Then: it says it was not a limit, nothing is printed, and no limit is recorded
+		// Then: it says it was not a limit, the event was not raised, and no limit is recorded
 		wasLimit.ShouldBeFalse();
-		output.ToString().ShouldBeEmpty();
+		raised.ShouldBeEmpty();
 		monitor.Reached.ShouldBeNull();
 		monitor.WhenReached.IsCompleted.ShouldBeFalse();
 	}
 
 	[Fact]
-	public async Task Report_DiskFull_IsReportedOnceInWordsAndRemembered() {
+	public async Task Report_DiskFull_RaisesLimitReachedOnceAndRemembersIt() {
 
-		// Given: a monitor writing to an in-memory console
-		var output = new StringWriter();
-		var monitor = new ResourceLimitMonitor(new ColorConsole(output));
+		// Given: a monitor with a subscriber to its LimitReached event
+		var monitor = new ResourceLimitMonitor();
+		var raised = new List<string>();
+		monitor.LimitReached += raised.Add;
 
 		// When: a full disk is reported twice, from two different places
 		var first = monitor.Report("writing capture file 12_s.txt", DiskFull());
 		var second = monitor.Report("writing the log", DiskFull());
 
-		// Then: both were recognized as a limit, but only the first is printed, the limit is remembered with where it happened,
-		// and the "reached" task completes with that description
+		// Then: both were recognized as a limit, but the event was raised only for the first, with where it happened;
+		// the limit is remembered, and the "reached" task completes with that description
 		first.ShouldBeTrue();
 		second.ShouldBeTrue();
-		output.ToString().TrimEnd().ShouldBe("Limit reached: the disk is full (while writing capture file 12_s.txt).");
+		raised.ShouldBe(new[] { "the disk is full (while writing capture file 12_s.txt)" });
 		monitor.Reached.ShouldBe("the disk is full (while writing capture file 12_s.txt)");
 		(await monitor.WhenReached).ShouldBe("the disk is full (while writing capture file 12_s.txt)");
+	}
+
+	[Fact]
+	public void Report_SeveralSubscribers_AllAreNotified() {
+
+		// Given: a monitor with two subscribers to its LimitReached event
+		var monitor = new ResourceLimitMonitor();
+		var first = new List<string>();
+		var second = new List<string>();
+		monitor.LimitReached += first.Add;
+		monitor.LimitReached += second.Add;
+
+		// When: a limit is reported
+		monitor.Report("testing", DiskFull());
+
+		// Then: both received the same description
+		first.ShouldBe(new[] { "the disk is full (while testing)" });
+		second.ShouldBe(first);
+	}
+
+	[Fact]
+	public void Report_ASubscriberThrows_TheOtherSubscribersAndTheCallerAreUnaffected() {
+
+		// Given: a monitor whose first subscriber throws and whose second subscriber records what it hears
+		var monitor = new ResourceLimitMonitor();
+		var heard = new List<string>();
+		monitor.LimitReached += _ => throw new InvalidOperationException("a broken subscriber");
+		monitor.LimitReached += heard.Add;
+
+		// When: a limit is reported
+		var wasLimit = monitor.Report("testing", DiskFull());
+
+		// Then: the report still returns normally and says it was a limit, the later subscriber still heard it, and the limit is recorded
+		wasLimit.ShouldBeTrue();
+		heard.ShouldBe(new[] { "the disk is full (while testing)" });
+		monitor.Reached.ShouldBe("the disk is full (while testing)");
+	}
+
+	[Fact]
+	public void Report_NoSubscribers_StillRecordsTheLimit() {
+
+		// Given: a monitor that nobody listens to
+		var monitor = new ResourceLimitMonitor();
+
+		// When: a limit is reported
+		var wasLimit = monitor.Report("testing", DiskFull());
+
+		// Then: it is recorded, without any error from there being no subscriber
+		wasLimit.ShouldBeTrue();
+		monitor.Reached.ShouldBe("the disk is full (while testing)");
 	}
 
 	[Fact]
 	public void Report_CustomClassifier_DecidesWhatCountsAsALimit() {
 
 		// Given: a monitor whose classifier treats an ArgumentException as a limit called "test limit"
-		var monitor = new ResourceLimitMonitor(new ColorConsole(new StringWriter()), ex => ex is ArgumentException ? "test limit" : null);
+		var monitor = new ResourceLimitMonitor(ex => ex is ArgumentException ? "test limit" : null);
 
 		// When: an ArgumentException and an IOException (disk full) are reported
 		var argument = monitor.Report("testing", new ArgumentException("x"));
@@ -232,7 +284,7 @@ public class ResourceLimit_Tests {
 		// Given: a capture whose monitor counts an ObjectDisposedException as a limit (the easiest write failure to cause on purpose),
 		// and an exchange that has already been completed, so its files are closed
 		using var folder = new TempFolder();
-		var monitor = new ResourceLimitMonitor(new ColorConsole(new StringWriter()), ex => ex is ObjectDisposedException ? "test limit" : null);
+		var monitor = new ResourceLimitMonitor(ex => ex is ObjectDisposedException ? "test limit" : null);
 		var capture = new FileSessionCapture(folder.Path, limits: monitor);
 		var exchange = capture.BeginExchange();
 		exchange.Complete(new ExchangeRecord());
@@ -258,7 +310,8 @@ public class ResourceLimit_Tests {
 		// Given: a proxy whose log fails with "disk full" (like a full disk under a log file), and a monitor wired to it as the program does
 		await using var origin = await TestOrigin.StartAsync(c => c.Response.WriteAsync("hello"));
 		var output = new StringWriter();
-		var monitor = new ResourceLimitMonitor(new ColorConsole(output));
+		var monitor = new ResourceLimitMonitor();
+		_ = new ResourceLimitConsoleReporter(monitor, new ColorConsole(output));   // the console front end, as in the program
 		var log = new CompositeExchangeLog(new IExchangeLog[] { new FailingLog(DiskFull()) }, ex => monitor.Report("writing the log", ex));
 		var originalError = Console.Error;
 		Console.SetError(new StringWriter());

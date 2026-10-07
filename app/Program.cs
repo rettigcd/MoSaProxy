@@ -41,7 +41,8 @@ Console.CancelKeyPress += (_, _) => { if (Interlocked.Increment(ref interrupts) 
 
 // Nothing is capped, but if the system itself runs out of something (disk space, memory, sockets, file handles) the proxy says
 // which limit it was and stops, instead of carrying on while quietly losing data.
-var limits = new ResourceLimitMonitor(console);
+var limits = new ResourceLimitMonitor();
+var limitReporter = new ResourceLimitConsoleReporter(limits, console);   // prints the limit when the monitor raises LimitReached
 var log = new CompositeExchangeLog(sinks.ToArray(), ex => limits.Report("writing the log", ex));
 
 var proxy = await ProxyHost.StartAsync(options, log, limits: limits);

@@ -17,13 +17,13 @@ A class is placed by its main focus. A line or two of console output inside an o
 
 | Category | Types |
 |---|---|
-| Core | 21 |
-| UI | 13 |
-| Mix | 2 |
+| Core | 22 |
+| UI | 14 |
+| Mix | 1 |
 | Other | 13 |
-| **Total** | **49** (48 declared types, plus the `Program` class the compiler generates) |
+| **Total** | **50** (49 declared types, plus the `Program` class the compiler generates) |
 
-## Core (21)
+## Core (22)
 
 | Type | Kind | File | Why |
 |---|---|---|---|
@@ -43,13 +43,14 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `ProxyActivity` | class | `ProxyActivity.cs` | Counts requests, tunnels and WebSockets in flight, so a shutdown can wait for and report them. |
 | `ProxyActivity.Scope` | nested class | `ProxyActivity.cs` | Decrements the count when an item finishes. |
 | `ResourceLimits` | static class | `ResourceLimits.cs` | Recognizes the failures that mean the system ran out of something (disk, memory, sockets, file handles). |
+| `ResourceLimitMonitor` | class | `ResourceLimits.cs` | Remembers the first limit hit, raises the `LimitReached` event once, and completes a task the program waits on. It prints nothing itself. |
 | `DuplexStream` | internal class | `TunnelHandler.cs` | Joins a read stream and a write stream into one, for relaying and TLS. |
 | `DuplexPipe` | internal class | `TunnelHandler.cs` | Reader and writer as one pipe, used to hand the decrypted stream to Kestrel. |
 | `ObservedStream` | internal class | `TunnelHandler.cs` | Remembers how much was read and the first read failure, to detect a client that rejects the certificate. |
 | `TlsConnectionFeature` | internal class | `TunnelHandler.cs` | Tells Kestrel a connection is TLS. |
 | `TlsApplicationProtocolFeature` | internal class | `TunnelHandler.cs` | Tells Kestrel which protocol (`h2` or `http/1.1`) the handshake negotiated. |
 
-## UI (13)
+## UI (14)
 
 | Type | Kind | File | Why |
 |---|---|---|---|
@@ -66,12 +67,12 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `InterceptionSetup` | static class | `InterceptionSetup.cs` | The startup dialog for HTTPS interception: reports the trust state, asks `[y/N]`, and prints the Chrome commands. It drives `RootTrust`, but its job is the conversation with the user. |
 | `ChromeLauncher` | static class | `ChromeLauncher.cs` | Builds the ready-to-paste Chrome commands shown to the user. |
 | `ProxyOptionsParser` | static class | `ProxyOptionsParser.cs` | Turns the command-line arguments into a `ProxyOptions`, and words the error and usage text. Starts from the defaults in `ProxyOptions`. |
+| `ResourceLimitConsoleReporter` | class | `ResourceLimitConsoleReporter.cs` | Subscribes to `ResourceLimitMonitor.LimitReached` and prints `Limit reached: ...` in red. |
 
-## Mix (2)
+## Mix (1)
 
 | Type | Kind | File | Core part | UI part |
 |---|---|---|---|---|
-| `ResourceLimitMonitor` | class | `ResourceLimits.cs` | Remembers the first limit hit and completes a task the program waits on | Prints `Limit reached: ...` in red |
 | `Program` (generated from `Program.cs`) | class | `Program.cs` | Starts the proxy, waits for stop or a limit, drains and stops, writes the archive | Console messages, Ctrl+C handling, argument errors, exit codes |
 
 ## Other (13)
@@ -117,6 +118,7 @@ These could reasonably go the other way.
 - **`HeaderRules` is Core**, even though one method (`ForLog`) only exists to prepare headers for the log.
 - **`ConsoleExchangeLog` is UI** although it implements the same interface as the file log.
 - **`ProxyOptions` is Core, `ProxyOptionsParser` is UI.** `ProxyOptions` used to be Mix, because it held both the settings and the command-line parsing with its error and usage text. The parsing moved into `ProxyOptionsParser`, so what is left in `ProxyOptions` is configuration the proxy needs, whichever front end sets it. The doc comments on its settings still name the command-line flags, which is documentation, not behaviour.
+- **`ResourceLimitMonitor` is Core, `ResourceLimitConsoleReporter` is UI.** The monitor used to print the limit itself (so it was Mix). It now raises a `LimitReached` event and the reporter, which subscribes to it, does the printing. That event is the way for core code to tell a front end something without knowing about the console. `Program` is now the only Mix type.
 
 ## Where core code touches the console
 
