@@ -4,9 +4,6 @@ using Microsoft.AspNetCore.Http;
 
 namespace MoSaProxy;
 
-/// <summary>What happened on one proxied WebSocket connection (Status is the HTTP status of the handshake; 101 means it was established).</summary>
-public sealed record WebSocketSummary(int Status, long ClientBytes, long OriginBytes, int ClientMessages, int OriginMessages, string? Error);
-
 /// <summary>
 /// Passes WebSocket connections through: it opens a WebSocket to the origin first (so the origin's choice of subprotocol is known),
 /// then accepts the client's WebSocket and copies messages between the two. Works for HTTP/1.1 upgrades and for

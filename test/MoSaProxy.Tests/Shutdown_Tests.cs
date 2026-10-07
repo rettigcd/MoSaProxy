@@ -238,6 +238,128 @@ public class Shutdown_Tests {
 		report.Drained.ShouldBeTrue();
 	}
 
+	static IOException DiskFull() => new("There is not enough space on the disk.", unchecked((int)0x80070070));
+
+	[Fact]
+	public async Task RunUntilStopped_StopRequested_DrainsRunningWorkAndReportsStopRequested() {
+
+		// Given: an origin that takes about a second to answer, a request to it under way, and a proxy waiting for something to stop it
+		await using var origin = await TestOrigin.StartAsync(async c => { await Task.Delay(1000); await c.Response.WriteAsync("done"); });
+		await using var proxy = await TestProxy.StartAsync();
+		var request = proxy.Client.GetAsync(origin.UrlFor("/slow"));
+		await WaitUntilAsync(() => proxy.Activity.Exchanges == 1);
+		var run = proxy.RunUntilStoppedAsync(TimeSpan.FromSeconds(10));
+
+		// When: a stop is requested (as Ctrl+C would)
+		proxy.RequestStop();
+		var result = await run;
+		var response = await request;
+
+		// Then: the stop was a stop request, the running request was allowed to finish, nothing was aborted, and no limit was involved
+		result.Reason.ShouldBe(StopReason.StopRequested);
+		result.Report.Drained.ShouldBeTrue();
+		result.Limit.ShouldBeNull();
+		response.StatusCode.ShouldBe(HttpStatusCode.OK);
+		(await response.Content.ReadAsStringAsync()).ShouldBe("done");
+	}
+
+	[Fact]
+	public async Task RunUntilStopped_LimitReached_StopsAtOnceWithoutDraining() {
+
+		// Given: an origin that would take ten seconds, a request to it under way, and a proxy that would drain for 30 seconds on a normal stop
+		await using var origin = await TestOrigin.StartAsync(c => Task.Delay(TimeSpan.FromSeconds(10), c.RequestAborted));
+		await using var proxy = await TestProxy.StartAsync();
+		var request = proxy.Client.GetAsync(origin.UrlFor("/very-slow"));
+		await WaitUntilAsync(() => proxy.Activity.Exchanges == 1);
+		var timer = Stopwatch.StartNew();
+		var run = proxy.RunUntilStoppedAsync(TimeSpan.FromSeconds(30));
+
+		// When: a limit is hit (a full disk is reported to the monitor)
+		proxy.Limits.Report("testing", DiskFull());
+		var result = await run;
+		timer.Stop();
+
+		// Then: the stop was because of the limit, it did not wait for the drain period, the running request was aborted and reported,
+		// and the result carries the limit's description
+		result.Reason.ShouldBe(StopReason.LimitReached);
+		timer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+		result.Report.Exchanges.ShouldBe(1);
+		result.Limit.ShouldBe("the disk is full (while testing)");
+		await Should.ThrowAsync<HttpRequestException>(() => request);
+	}
+
+	[Fact]
+	public async Task RunUntilStopped_StopRequested_TellsTheCallerWhyBeforeTheDrainBegins() {
+
+		// Given: a request under way (about a second long), and a caller that records what it is told and how much was still running at that moment
+		await using var origin = await TestOrigin.StartAsync(async c => { await Task.Delay(1000); await c.Response.WriteAsync("done"); });
+		await using var proxy = await TestProxy.StartAsync();
+		var request = proxy.Client.GetAsync(origin.UrlFor("/slow"));
+		await WaitUntilAsync(() => proxy.Activity.Exchanges == 1);
+		var told = new List<StopReason>();
+		int runningWhenTold = -1;
+
+		// When: a stop is requested
+		var run = proxy.RunUntilStoppedAsync(TimeSpan.FromSeconds(10), onStopping: reason => { told.Add(reason); runningWhenTold = proxy.Activity.Exchanges; });
+		proxy.RequestStop();
+		await run;
+		await request;
+
+		// Then: the caller was told exactly once, with the reason, while the request was still running (so before the drain finished)
+		told.ShouldBe(new[] { StopReason.StopRequested });
+		runningWhenTold.ShouldBe(1);
+	}
+
+	[Fact]
+	public async Task RunUntilStopped_LimitHitWhileDraining_StillStopsAsRequestedButReportsTheLimit() {
+
+		// Given: a request that needs about two seconds, and a proxy told to drain for up to ten
+		await using var origin = await TestOrigin.StartAsync(async c => { await Task.Delay(2000); await c.Response.WriteAsync("done"); });
+		await using var proxy = await TestProxy.StartAsync();
+		var request = proxy.Client.GetAsync(origin.UrlFor("/slow"));
+		await WaitUntilAsync(() => proxy.Activity.Exchanges == 1);
+		var run = proxy.RunUntilStoppedAsync(TimeSpan.FromSeconds(10));
+
+		// When: a stop is requested, and then, while the proxy is draining, a limit is hit
+		proxy.RequestStop();
+		await Task.Delay(300);
+		proxy.Limits.Report("testing", DiskFull());
+		var result = await run;
+		var response = await request;
+
+		// Then: the reason is still the stop request and the drain was not cut short, but the result carries the limit so it is not missed
+		result.Reason.ShouldBe(StopReason.StopRequested);
+		result.Report.Drained.ShouldBeTrue();
+		result.Limit.ShouldBe("the disk is full (while testing)");
+		response.StatusCode.ShouldBe(HttpStatusCode.OK);
+	}
+
+	[Fact]
+	public async Task RunUntilStopped_SkipSignalled_StopsAtOnceAfterAStopRequest() {
+
+		// Given: an origin that would take ten seconds, a request to it under way, and a skip signal (the second Ctrl+C)
+		await using var origin = await TestOrigin.StartAsync(c => Task.Delay(TimeSpan.FromSeconds(10), c.RequestAborted));
+		await using var proxy = await TestProxy.StartAsync();
+		var request = proxy.Client.GetAsync(origin.UrlFor("/very-slow"));
+		await WaitUntilAsync(() => proxy.Activity.Exchanges == 1);
+		using var skip = new CancellationTokenSource();
+		var timer = Stopwatch.StartNew();
+		var run = proxy.RunUntilStoppedAsync(TimeSpan.FromSeconds(30), skip.Token);
+
+		// When: a stop is requested, and the skip signal is given 200 ms later
+		proxy.RequestStop();
+		await Task.Delay(200);
+		skip.Cancel();
+		var result = await run;
+		timer.Stop();
+
+		// Then: it stopped within moments, not after 30 seconds, and reported the aborted request
+		timer.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(5));
+		result.Reason.ShouldBe(StopReason.StopRequested);
+		result.Report.Exchanges.ShouldBe(1);
+		await Should.ThrowAsync<HttpRequestException>(() => request);
+	}
+
 	[Fact]
 	public async Task Stop_CalledTwice_GivesTheSameResultAndDisposeAfterwardsIsFine() {
 

@@ -62,11 +62,11 @@ This part is not from the research above; it records the state of the project ag
 | Way of using it | In MoSaProxy today |
 |---|---|
 | Terminal UI | No |
-| Browser-based GUI | No (a viewer was ruled out for now) |
+| Browser-based GUI | No (a viewer was ruled out for now; several front ends sharing one Core are the long-term goal, see [class-classification.md](class-classification.md)) |
 | Headless | Yes: MoSaProxy is a command-line program, like `mitmdump` |
 
 | Save as | In MoSaProxy today |
 |---|---|
 | SAZ | Done, but not yet confirmed to open in Fiddler |
-| HAR | Not started. It was ruled out of Phase 5, so this wish-list entry and that decision need reconciling |
-| mitm (mitmproxy) | Not started |
+| HAR | Not started. Wanted as a Core capability (every front end gets it); it was only left out of Phase 5, so the timing is open |
+| mitm (mitmproxy) | Not started. Also wanted as a Core capability |

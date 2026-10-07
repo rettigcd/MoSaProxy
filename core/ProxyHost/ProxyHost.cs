@@ -8,11 +8,6 @@ using Microsoft.Extensions.Logging;
 
 namespace MoSaProxy;
 
-/// <summary>What was still running when a shutdown's drain period ended and had to be aborted. All zeros means everything finished by itself.</summary>
-public sealed record ShutdownReport(int Exchanges, int Tunnels, int WebSockets) {
-	public bool Drained => Exchanges + Tunnels + WebSockets == 0;
-}
-
 /// <summary>Hosts the proxy on a Kestrel listener bound to loopback only.</summary>
 public sealed class ProxyHost : IAsyncDisposable {
 	readonly WebApplication _app;
@@ -99,6 +94,30 @@ public sealed class ProxyHost : IAsyncDisposable {
 		var requested = new TaskCompletionSource();
 		_app.Lifetime.ApplicationStopping.Register(() => requested.TrySetResult());
 		return requested.Task;
+	}
+
+	/// <summary>Asks the application to stop, as Ctrl+C does. It does not wait: <see cref="WaitForStopRequestAsync"/> then completes.</summary>
+	public void RequestStop() => _app.Lifetime.StopApplication();
+
+	/// <summary>
+	/// Runs until something asks the proxy to stop or a limit is hit, then stops it and says how that went. This is the proxy's
+	/// lifecycle policy, so that a front end only has to show it:
+	/// <list type="bullet">
+	/// <item>a stop request drains for up to <paramref name="drainTimeout"/> (or less, if <paramref name="skipDrain"/> is signalled);</item>
+	/// <item>a limit stops the proxy at once with no drain, because it can no longer record what passes through it.</item>
+	/// </list>
+	/// </summary>
+	/// <param name="onStopping">Called once the reason is known and before the stop starts, so a front end can tell the user (for example how much is still in flight, from <see cref="Activity"/>).</param>
+	public async Task<StopResult> RunUntilStoppedAsync(TimeSpan drainTimeout, CancellationToken skipDrain = default, Action<StopReason>? onStopping = null) {
+		var stopRequested = WaitForStopRequestAsync();
+		var reason = await Task.WhenAny(stopRequested, Limits.WhenReached) == stopRequested ? StopReason.StopRequested : StopReason.LimitReached;
+
+		onStopping?.Invoke(reason);
+		var report = reason == StopReason.LimitReached
+			? await StopAsync(TimeSpan.Zero)
+			: await StopAsync(drainTimeout, skipDrain);
+
+		return new StopResult(reason, report, Limits.Reached);
 	}
 
 	/// <summary>

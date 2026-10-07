@@ -118,6 +118,16 @@ public sealed class TestProxy : IAsyncDisposable {
 	/// <summary>Starts a graceful stop (see <see cref="ProxyHost.StopAsync"/>). Disposing the proxy afterwards is still fine.</summary>
 	public Task<ShutdownReport> StopAsync(TimeSpan drainTimeout, CancellationToken skipDrain = default) => _host.StopAsync(drainTimeout, skipDrain);
 
+	/// <summary>Asks the proxy to stop, as Ctrl+C would.</summary>
+	public void RequestStop() => _host.RequestStop();
+
+	/// <summary>Waits for a stop request or a limit and then stops (see <see cref="ProxyHost.RunUntilStoppedAsync"/>).</summary>
+	public Task<StopResult> RunUntilStoppedAsync(TimeSpan drainTimeout, CancellationToken skipDrain = default, Action<StopReason>? onStopping = null) =>
+		_host.RunUntilStoppedAsync(drainTimeout, skipDrain, onStopping);
+
+	/// <summary>Reports when a limit is hit; tests use it to simulate one.</summary>
+	public ResourceLimitMonitor Limits => _host.Limits;
+
 	public static async Task<TestProxy> StartAsync(ProxyOptions? options = null, ISessionCapture? capture = null, bool clientTrustsProxyCa = true) {
 		var log = new MemoryExchangeLog();
 		var host = await ProxyHost.StartAsync(options ?? new ProxyOptions { Port = 0 }, log, capture);

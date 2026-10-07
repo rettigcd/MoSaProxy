@@ -136,6 +136,25 @@ Design points to settle during Phase 1b:
 - **Metadata.** `_m.xml` should carry at least the fields in the log record (timestamps, client endpoint,
   protocol versions, status, byte counts, mode, error), written in Fiddler's schema where practical.
 
+### 6. Architecture goal: one Core, several UIs
+
+Core holds everything that is not tied to a user interface (proxying, interception, certificates, shutdown, limits,
+logs, capture files, trust store, and the save formats). Each front end references Core and does only the presenting,
+so nothing is written twice. Today there is one front end, the console program, in the same `app/` project.
+[class-classification.md](class-classification.md) maps every type to Core or UI and lists the work to separate them.
+
+Save formats, all to be produced by Core so that every front end gets them:
+
+| Format | State |
+|---|---|
+| `.saz` (Fiddler) | Done (`SazExporter`) |
+| mitmproxy flow file | Not started |
+| `.har` | Not started |
+
+Follow-up work, not yet started: a separate Core class library; replacing Core's direct console diagnostics with events;
+a Core service for the orchestration every front end would repeat; one exporter shape that `.saz`, mitmproxy flow and
+`.har` plug into.
+
 ## Testing approach
 
 - **Long-term functionality is tested in the test project** (`test/MoSaProxy.Tests`). When implementing any phase,
@@ -305,7 +324,10 @@ Original scope for reference:
   whatever is left is aborted (still logged and captured, with no status if nothing had been sent) and counted in the final
   message. A second Ctrl+C skips the wait. The `--saz` archive is written only after all of that, so it is complete.
   Note: `WebApplication.WaitForShutdownAsync` stops the host with its own time limit as soon as it is signalled, so
-  `ProxyHost.WaitForStopRequestAsync` is used instead, and `StopAsync` does the draining. Verified with the test suite and
+  `ProxyHost.WaitForStopRequestAsync` is used instead, and `StopAsync` does the draining. The policy that ties it together,
+  "drain on a stop request, stop at once on a limit, skippable drain", lives in `ProxyHost.RunUntilStoppedAsync`
+  (it returns a `StopResult`: the reason, the shutdown report and any limit hit, even one hit while draining), so
+  `Program` only shows what is happening and picks the exit code (2 if any limit was hit). Verified with the test suite and
   with a real process receiving a real console interrupt (one interrupt: the in-flight request completed and the archive
   was written; two: the 30 s drain was skipped and the request aborted).
 - **Safety limits *(decided and done)*:** the decision was: no new caps (the log, the capture folder, connections, tunnels
@@ -342,7 +364,8 @@ Original scope for reference:
   the response-side timers all equal the end time, and DNS, connect and TLS timings are 0. (3) `BitFlags` is 0 and
   `PipeInfo` is omitted. (4) `N_w.txt` is MoSaProxy's readable layout, not Fiddler's own WebSocket format, so Fiddler may not
   display the messages. (5) The `_c`/`_s` files are still the Kestrel reconstructions described under Phase 6.
-- Optional inspection UI or log viewer; HAR export.
+- Not done, and not wanted in Phase 5: a viewer UI, and packaging. HAR export and the mitmproxy flow format are wanted, as
+  Core capabilities (see "Architecture goal" below); their timing is open.
 - Packaging as a Windows service or a single-file executable.
 
 ### Phase 6: Byte-exact capture (replace or bypass Kestrel)

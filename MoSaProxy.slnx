@@ -3,4 +3,5 @@
     <Project Path="test/MoSaProxy.Tests/MoSaProxy.Tests.csproj" />
   </Folder>
   <Project Path="app/MoSaProxy.csproj" />
+  <Project Path="core/MoSaProxy.Core.csproj" />
 </Solution>
