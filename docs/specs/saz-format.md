@@ -33,7 +33,7 @@ so `_index.htm` is a convenience, not data (the loader does not need it, section
 | Writer | "version made by" 5.1, host system FAT (MS-DOS); .NET `System.IO.Compression`-style output with Zip64 extra fields on entries. |
 | Timestamps | All entries carry the save time (the moment the archive was written), not the capture time. |
 | Archive comment | `Fiddler (vX.Y.Z.W) Session Archive. See https://api.getfiddler.com/r/?fiddler` |
-| Encryption | The Save dialog of the Fiddler version tested offers no password option, so archives it writes are not encrypted. Other Fiddler builds may encrypt them with zip encryption **(inferred)**. |
+| Encryption | Optional password protection. A protected archive uses WinZip AES encryption (AE-2, 128-bit key: compression method 99, an extra field `0x9901` with vendor `AE`, strength 1 and the real method, 8 deflate; general-purpose flag bit 0 set). Every file entry is encrypted, including `_index.htm`; the `raw/` folder entry and `[Content_Types].xml` are not. The zip comment is unchanged. A reader that cannot decrypt AES zips cannot open such an archive. |
 
 ## 3. Numbering and names
 
