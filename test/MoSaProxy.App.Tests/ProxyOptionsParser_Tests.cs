@@ -53,6 +53,7 @@ public class ProxyOptionsParser_Tests {
 	[InlineData("--untrust-ca")]
 	[InlineData("--no-http2")]
 	[InlineData("--saz")]
+	[InlineData("--open")]
 	[InlineData("--export-saz")]
 	[InlineData("--log-max-mb")]
 	[InlineData("--log-keep")]
@@ -230,6 +231,62 @@ public class ProxyOptionsParser_Tests {
 		// Then: the first turns on the archive at shutdown, and the second is an error because there would be nothing to pack
 		accepted.SazOnShutdown.ShouldBeTrue();
 		Should.Throw<ArgumentException>(refused);
+	}
+
+	[Fact]
+	public void Parse_OpenAlone_OpensTheBrowserAtItsOwnStartPage() {
+
+		// Given: --open with nothing after it
+		var args = new[] { "--open" };
+
+		// When: the options are parsed
+		var options = ProxyOptionsParser.Parse(args);
+
+		// Then: the browser is to be opened, with no page chosen
+		options.OpenBrowser.ShouldBeTrue();
+		options.OpenUrl.ShouldBeNull();
+	}
+
+	[Fact]
+	public void Parse_OpenWithAUrl_OpensThatPage() {
+
+		// Given: --open followed by a URL, then another option
+		var args = new[] { "--open", "http://example.com/", "--port", "9000" };
+
+		// When: the options are parsed
+		var options = ProxyOptionsParser.Parse(args);
+
+		// Then: the URL is the page to open, and the next option is still read as an option
+		options.OpenBrowser.ShouldBeTrue();
+		options.OpenUrl.ShouldBe("http://example.com/");
+		options.Port.ShouldBe(9000);
+	}
+
+	[Fact]
+	public void Parse_OpenFollowedByAnotherOption_TakesNoUrl() {
+
+		// Given: --open directly followed by another option
+		var args = new[] { "--open", "--no-http2" };
+
+		// When: the options are parsed
+		var options = ProxyOptionsParser.Parse(args);
+
+		// Then: no page is chosen, and --no-http2 is still read
+		options.OpenBrowser.ShouldBeTrue();
+		options.OpenUrl.ShouldBeNull();
+	}
+
+	[Fact]
+	public void Parse_NoOpen_DoesNotOpenTheBrowser() {
+
+		// Given: no --open
+		var args = new[] { "--port", "9000" };
+
+		// When: the options are parsed
+		var options = ProxyOptionsParser.Parse(args);
+
+		// Then: the browser is not opened
+		options.OpenBrowser.ShouldBeFalse();
 	}
 
 	[Fact]

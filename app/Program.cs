@@ -50,9 +50,22 @@ StopResult result;
 try {
 	console.WriteLine($"HTTP proxy listening on 127.0.0.1:{proxy.Port}. Press Ctrl+C to stop.");
 	if (proxy.CaptureRunDirectory is not null) console.WriteLine($"Capturing sessions to {proxy.CaptureRunDirectory}");
+	bool rootTrusted = false;
 	if (proxy.Authority is { } authority) {
 		bool interactive = OperatingSystem.IsWindows() && !Console.IsInputRedirected;
-		InterceptionSetup.Run(authority, proxy.Port, ChromeLauncher.FindChrome(), new RootTrust(new WindowsUserRootStore()), Console.In, console, interactive);
+		rootTrusted = InterceptionSetup.Run(authority, proxy.Port, ChromeLauncher.FindChrome(), new RootTrust(new WindowsUserRootStore()), Console.In, console, interactive);
+	}
+
+	// The browser is started last, once the proxy is listening and any trust question has been answered.
+	if (options.OpenBrowser) {
+		// Without interception HTTPS is only tunnelled, so there is no certificate to reject. With it, a Chrome that is not told to
+		// ignore certificate errors would refuse every page unless Windows already trusts the root.
+		bool ignoreCertificateErrors = options.Intercept && !rootTrusted;
+		string chrome = ChromeLauncher.FindChrome();
+		if (ChromeLauncher.TryStart(chrome, proxy.Port, ignoreCertificateErrors, options.OpenUrl, out string? openError))
+			console.WriteLine($"Opened Chrome, using the proxy{(ignoreCertificateErrors ? " (it ignores certificate errors; use it only for browsing through this proxy)" : "")}.");
+		else
+			console.WriteLine($"{Fg.Red}Could not open Chrome:{Fg.Restore} {openError}");
 	}
 
 	// When and how to stop is the host's policy (drain on a stop request, stop at once on a limit); this only tells the user.

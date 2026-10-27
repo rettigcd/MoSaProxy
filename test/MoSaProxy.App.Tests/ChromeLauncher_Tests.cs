@@ -78,4 +78,50 @@ public class ChromeLauncher_Tests {
 		// Then: the result is a path to chrome.exe (an existing install, or the default location if none was found)
 		Path.GetFileName(path).ShouldBe("chrome.exe");
 	}
+
+	[Fact]
+	public void Arguments_ForTheProxy_UseTheThrowawayProfileAndTheProxyPort() {
+
+		// Given: a proxy port, a trusted root (no need to ignore certificate errors) and no page
+		// (supplied below)
+
+		// When: the arguments for starting Chrome are built
+		var arguments = ChromeLauncher.Arguments(8080, ignoreCertificateErrors: false, url: null);
+
+		// Then: they name the throwaway profile in the temp folder and the proxy, skip the first-run prompts, and neither ignore certificates nor name a page
+		arguments.ShouldContain($"--user-data-dir={Path.Combine(Path.GetTempPath(), "chrome-mosaproxy")}");
+		arguments.ShouldContain("--proxy-server=http://127.0.0.1:8080");
+		arguments.ShouldContain("--no-first-run");
+		arguments.ShouldContain("--no-default-browser-check");
+		arguments.ShouldNotContain("--ignore-certificate-errors");
+		arguments.Count.ShouldBe(4);
+	}
+
+	[Fact]
+	public void Arguments_IgnoringCertificateErrorsWithAPage_AddsTheFlagAndEndsWithThePage() {
+
+		// Given: a proxy port, an untrusted root and a page to open
+		// (supplied below)
+
+		// When: the arguments for starting Chrome are built
+		var arguments = ChromeLauncher.Arguments(9000, ignoreCertificateErrors: true, url: "https://example.com/");
+
+		// Then: the ignore flag is included and the page is last, where Chrome expects it
+		arguments.ShouldContain("--ignore-certificate-errors");
+		arguments[^1].ShouldBe("https://example.com/");
+	}
+
+	[Fact]
+	public void TryStart_ChromeIsNotThere_ReportsWhereItLooked() {
+
+		// Given: a path where there is no Chrome
+		string missing = Path.Combine(Path.GetTempPath(), "no-such-folder", "chrome.exe");
+
+		// When: starting it is attempted
+		bool started = ChromeLauncher.TryStart(missing, 8080, ignoreCertificateErrors: false, url: null, out var error);
+
+		// Then: nothing is started, and the error names the path
+		started.ShouldBeFalse();
+		error.ShouldContain(missing);
+	}
 }

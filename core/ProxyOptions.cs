@@ -74,6 +74,12 @@ public sealed class ProxyOptions {
 	/// <summary>With capture on, also write this run's folder as a .saz archive when the proxy stops.</summary>
 	public bool SazOnShutdown { get; init; }
 
+	/// <summary>Start a browser that uses the proxy once it is listening.</summary>
+	public bool OpenBrowser { get; init; }
+
+	/// <summary>The page the browser opens first (see <see cref="OpenBrowser"/>); null means the browser's own start page.</summary>
+	public string? OpenUrl { get; init; }
+
 	/// <summary>
 	/// Offer HTTP/2 (as well as HTTP/1.1) to clients on intercepted HTTPS connections. On by default;
 	/// <c>--no-http2</c> turns it off, which is useful when debugging a problem that might be HTTP/2 specific.

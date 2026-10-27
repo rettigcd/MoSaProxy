@@ -11,7 +11,7 @@ public static class ProxyOptionsParser {
 	/// <summary>Shown after an unknown argument.</summary>
 	public const string Usage =
 		"Usage: MoSaProxy [--port N] [--log FILE] [--capture DIR] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] " +
-		"[--intercept-bypass HOSTS] [--ca-dir DIR] [--untrust-ca] [--no-http2] [--saz] [--export-saz RUN_DIR [FILE]] [--log-max-mb N] " +
+		"[--intercept-bypass HOSTS] [--ca-dir DIR] [--untrust-ca] [--no-http2] [--saz] [--open [URL]] [--export-saz RUN_DIR [FILE]] [--log-max-mb N] " +
 		"[--log-keep N] [--drain-timeout SECONDS]";
 
 	/// <exception cref="ArgumentException">An argument is unknown, is missing its value, or has a value that is out of range. The message is meant for the user.</exception>
@@ -32,6 +32,8 @@ public static class ProxyOptionsParser {
 		var drainTimeout = defaults.DrainTimeout;
 		string? exportSazFolder = defaults.ExportSazFolder, exportSazOutput = defaults.ExportSazOutput;
 		bool sazOnShutdown = defaults.SazOnShutdown;
+		bool openBrowser = defaults.OpenBrowser;
+		string? openUrl = defaults.OpenUrl;
 
 		for (int i = 0; i < args.Length; i++) {
 			switch (args[i]) {
@@ -62,6 +64,10 @@ public static class ProxyOptionsParser {
 						throw new ArgumentException("--export-saz requires the capture run folder to pack (and optionally the .saz file to write).");
 					exportSazFolder = args[++i];
 					if (i + 1 < args.Length && !args[i + 1].StartsWith("--")) exportSazOutput = args[++i];
+					break;
+				case "--open":
+					openBrowser = true;
+					if (i + 1 < args.Length && !args[i + 1].StartsWith("--")) openUrl = args[++i];
 					break;
 				case "--saz":
 					sazOnShutdown = true;
@@ -108,7 +114,7 @@ public static class ProxyOptionsParser {
 		return new ProxyOptions {
 			Port = port, LogPath = logPath, CaptureDirectory = captureDirectory, CaptureMaxBodyBytes = captureMaxBody,
 			ConnectTimeout = connectTimeout, Intercept = intercept, InterceptBypass = bypass, CaDirectory = caDirectory, UntrustCa = untrustCa, EnableHttp2 = http2,
-			ExportSazFolder = exportSazFolder, ExportSazOutput = exportSazOutput, SazOnShutdown = sazOnShutdown,
+			ExportSazFolder = exportSazFolder, ExportSazOutput = exportSazOutput, SazOnShutdown = sazOnShutdown, OpenBrowser = openBrowser, OpenUrl = openUrl,
 			LogMaxBytes = logMaxBytes, LogKeep = logKeep, DrainTimeout = drainTimeout,
 		};
 	}

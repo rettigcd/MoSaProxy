@@ -105,7 +105,7 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `Bg` | static class | `ConsoleEx.cs` | The named background colours. |
 | `ConsoleExchangeLog` | class | `ConsoleExchangeLog.cs` | Prints one coloured line per exchange (blue methods, status coloured by class). |
 | `InterceptionSetup` | static class | `InterceptionSetup.cs` | The startup dialog for HTTPS interception: reports the trust state, asks `[y/N]`, and prints the Chrome commands. It drives `RootTrust`, but its job is the conversation with the user. |
-| `ChromeLauncher` | static class | `ChromeLauncher.cs` | Builds the ready-to-paste Chrome commands shown to the user. |
+| `ChromeLauncher` | static class | `ChromeLauncher.cs` | Builds the ready-to-paste Chrome commands shown to the user, and starts that Chrome for `--open`. |
 | `ProxyOptionsParser` | static class | `ProxyOptionsParser.cs` | Turns the command-line arguments into a `ProxyOptions`, and words the error and usage text. Starts from the defaults in `ProxyOptions`. |
 | `ResourceLimitConsoleReporter` | class | `ResourceLimitConsoleReporter.cs` | Subscribes to `ResourceLimitMonitor.LimitReached` and prints `Limit reached: ...` in red. |
 | `Program` (generated from `Program.cs`) | class | `Program.cs` | The console front end and orchestrator: parses the arguments, runs the `--untrust-ca` and `--export-saz` commands, wires the log, limit monitor and reporter, starts the host, shows the startup and stop messages, counts Ctrl+C presses, writes the `.saz`, and returns the exit code. The decisions about how to stop live in `ProxyHost.RunUntilStoppedAsync`. |
