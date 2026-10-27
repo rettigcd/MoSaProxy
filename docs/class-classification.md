@@ -47,6 +47,7 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `HeaderRules` | static class | `HeaderRules.cs` | Which headers must not be forwarded (hop-by-hop and `Connection`-named). Also holds a small helper that flattens headers for the log. |
 | `CountingStream` | class | `CountingStream.cs` | Counts the bytes that pass through a stream while forwarding. |
 | `ExchangeRecord` | record | `ExchangeLog/ExchangeRecord.cs` | The data describing one exchange (method, URL, status, protocols, sizes, timing, mode, error). Produced by the proxy; consumed by logs, capture and the console. |
+| `ExchangeTimes` | record | `ExchangeLog/ExchangeTimes.cs` | When the stages of one exchange happened (client connected, headers read, request sent, response headers, first and last byte to the client). Carried by `ExchangeRecord`; used by the `.saz` export for the session timers. |
 | `ProxyActivity` | class | `ProxyActivity.cs` | Counts requests, tunnels and WebSockets in flight, so a shutdown can wait for and report them. |
 | `ProxyActivity.Scope` | nested class | `ProxyActivity.cs` | Decrements the count when an item finishes. |
 | `ResourceLimits` | static class | `ResourceLimits.cs` | Recognizes the failures that mean the system ran out of something (disk, memory, sockets, file handles). |

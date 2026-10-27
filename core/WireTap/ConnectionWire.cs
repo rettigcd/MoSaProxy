@@ -16,9 +16,13 @@ public sealed class ConnectionWire {
 	const int MaxSentBytes = 16 * 1024;
 	long _cursor;          // absolute offset where the next HTTP/1.x request starts
 	long _seen;
+	int _requestsHandled;  // requests the handler has started on this connection
 	bool _stopped;
 
 	internal ConnectionWire(ResourceLimitMonitor limits) => _limits = limits;
+
+	/// <summary>When the client connected to the proxy.</summary>
+	public DateTimeOffset Opened { get; } = DateTimeOffset.UtcNow;
 
 	/// <summary>True when the client speaks HTTP/2 on this connection (it started with the HTTP/2 preface).</summary>
 	public bool IsHttp2 { get { lock (_lock) return _http2 is not null; } }
@@ -74,6 +78,9 @@ public sealed class ConnectionWire {
 			return (request, start < 0 ? null : _sent.AsSpan(start, _sentCount - start).ToArray());
 		}
 	}
+
+	/// <summary>Counts a request the handler has started on this connection; true when it is not the first, meaning the client kept the connection alive.</summary>
+	public bool NoteRequestIsReuse() => Interlocked.Increment(ref _requestsHandled) > 1;
 
 	/// <summary>Stops recording and forgets what was held (the connection was upgraded, for example to a WebSocket).</summary>
 	public void StopRecording() { lock (_lock) Stop(); }

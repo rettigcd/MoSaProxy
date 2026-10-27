@@ -183,7 +183,24 @@ sealed class FileExchangeCapture : IExchangeCapture {
 				new XElement("ResponseBodyTruncated", responseBodyMissing || ((_wireResponse is null ? _responseTee?.Truncated : responseTruncated) ?? false)),
 				new XElement("DurationMs", Math.Round(record.DurationMs, 1)),
 				new XElement("Mode", record.Mode),
-				new XElement("Error", record.Error ?? ""));
+				new XElement("Error", record.Error ?? ""),
+				new XElement("ClientConnectionReused", record.ClientConnectionReused),
+				new XElement("OriginConnectionReused", record.OriginConnectionReused),
+				new XElement("OriginConnectionId", record.OriginConnectionId?.ToString() ?? ""),
+				new XElement("ClientPort", record.ClientPort),
+				new XElement("ClientTlsVersion", record.ClientTlsVersion ?? ""));
+			if (record.Times is { } times) {
+				var element = new XElement("Times");
+				void Stamp(string name, DateTimeOffset? value) { if (value is { } at) element.Add(new XAttribute(name, at.ToString("O"))); }
+				Stamp("ClientConnected", times.ClientConnected);
+				Stamp("GotRequestHeaders", times.GotRequestHeaders);
+				Stamp("ClientDoneRequest", times.ClientDoneRequest);
+				Stamp("FiddlerBeginRequest", times.FiddlerBeginRequest);
+				Stamp("GotResponseHeaders", times.GotResponseHeaders);
+				Stamp("ClientBeginResponse", times.ClientBeginResponse);
+				Stamp("ClientDoneResponse", times.ClientDoneResponse);
+				meta.Add(element);
+			}
 			if (record.ClientMessages is not null) meta.Add(new XElement("ClientMessages", record.ClientMessages));
 			if (record.OriginMessages is not null) meta.Add(new XElement("OriginMessages", record.OriginMessages));
 			// Write to a temp name and rename, so a reader never sees a half-written metadata file.

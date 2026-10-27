@@ -30,6 +30,9 @@ public sealed class TunnelHandler(
 	/// <summary>Key in the connection's Items holding the https:// base URI of an intercepted connection.</summary>
 	public const string InterceptTargetKey = "MoSaProxy.intercept-target";
 
+	/// <summary>The connection item holding the TLS version negotiated with the client inside an intercepted tunnel.</summary>
+	public const string ClientTlsVersionKey = "MoSaProxy.client-tls-version";
+
 	const int MaxHeadBytes = 64 * 1024;
 	static readonly byte[] ConnectPrefix = Encoding.ASCII.GetBytes("CONNECT ");
 	static readonly byte[] Established = Encoding.ASCII.GetBytes("HTTP/1.1 200 Connection Established\r\n\r\n");
@@ -293,6 +296,7 @@ public sealed class TunnelHandler(
 		}
 
 		connection.Items[InterceptTargetKey] = new UriBuilder(Uri.UriSchemeHttps, host, port).Uri;
+		connection.Items[ClientTlsVersionKey] = tls.SslProtocol.ToString();
 		// Kestrel only picks HTTP/2 for a connection that looks like TLS and reports "h2" as the negotiated protocol,
 		// so tell it what the handshake above agreed on.
 		connection.Features.Set<ITlsConnectionFeature>(new TlsConnectionFeature());

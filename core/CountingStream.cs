@@ -5,6 +5,12 @@ public sealed class CountingStream(Stream inner) : Stream {
 	public long BytesRead { get; private set; }
 	public long BytesWritten { get; private set; }
 
+	/// <summary>When a read first returned 0 (the end of the stream was reached), or null.</summary>
+	public DateTimeOffset? EndReadAt { get; private set; }
+
+	/// <summary>When data was first written, or null.</summary>
+	public DateTimeOffset? FirstWriteAt { get; private set; }
+
 	public override bool CanRead => inner.CanRead;
 	public override bool CanSeek => false;
 	public override bool CanWrite => inner.CanWrite;
@@ -14,22 +20,26 @@ public sealed class CountingStream(Stream inner) : Stream {
 	public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) {
 		int n = await inner.ReadAsync(buffer, cancellationToken);
 		BytesRead += n;
+		if (n == 0) EndReadAt ??= DateTimeOffset.UtcNow;
 		return n;
 	}
 
 	public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) {
 		await inner.WriteAsync(buffer, cancellationToken);
+		FirstWriteAt ??= DateTimeOffset.UtcNow;
 		BytesWritten += buffer.Length;
 	}
 
 	public override int Read(byte[] buffer, int offset, int count) {
 		int n = inner.Read(buffer, offset, count);
 		BytesRead += n;
+		if (n == 0) EndReadAt ??= DateTimeOffset.UtcNow;
 		return n;
 	}
 
 	public override void Write(byte[] buffer, int offset, int count) {
 		inner.Write(buffer, offset, count);
+		FirstWriteAt ??= DateTimeOffset.UtcNow;
 		BytesWritten += count;
 	}
 

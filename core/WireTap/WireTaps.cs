@@ -15,6 +15,7 @@ namespace MoSaProxy;
 public sealed class WireTaps(ResourceLimitMonitor limits, IExchangeLog log, ISessionCapture capture) {
 	readonly ConcurrentDictionary<string, ConnectionWire> _connections = new();
 	readonly ConcurrentDictionary<Http2OriginWire, byte> _http2Origins = new();
+	int _originConnections;
 
 	/// <summary>The recording of one client connection, or null if it is not being recorded.</summary>
 	public ConnectionWire? ForConnection(string connectionId) => _connections.TryGetValue(connectionId, out var wire) ? wire : null;
@@ -73,7 +74,7 @@ public sealed class WireTaps(ResourceLimitMonitor limits, IExchangeLog log, ISes
 
 	/// <summary>Wraps the plain-text stream of a connection to an origin, whether it carries HTTP/1.x or HTTP/2.</summary>
 	internal Stream TapOrigin(SocketsHttpPlaintextStreamFilterContext context) {
-		if (context.NegotiatedHttpVersion.Major == 1) return new OriginTapStream(context.PlaintextStream, new OriginWire(limits));
+		if (context.NegotiatedHttpVersion.Major == 1) return new OriginTapStream(context.PlaintextStream, new OriginWire(limits, Interlocked.Increment(ref _originConnections)));
 		var wire = new Http2OriginWire(limits);
 		_http2Origins[wire] = 0;
 		return new OriginTapStream(context.PlaintextStream, wire);

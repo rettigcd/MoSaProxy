@@ -112,7 +112,7 @@ public class CaptureSource_Tests {
 
 		// Then: the session has x-mosaproxy-request-source and x-mosaproxy-response-source flags saying "wire"
 		using var zip = ZipFile.OpenRead(saz);
-		using var stream = zip.GetEntry("raw/1_m.xml")!.Open();   // (the metadata is complete: Export read it from the finished run folder)
+		using var stream = zip.GetEntry("raw/001_m.xml")!.Open();   // (the metadata is complete: Export read it from the finished run folder)
 		var flags = XDocument.Load(stream).Root!.Element("SessionFlags")!.Elements("SessionFlag").ToDictionary(f => f.Attribute("N")!.Value, f => f.Attribute("V")!.Value);
 		flags["x-mosaproxy-request-source"].ShouldBe(CaptureSource.Wire);
 		flags["x-mosaproxy-response-source"].ShouldBe(CaptureSource.Wire);

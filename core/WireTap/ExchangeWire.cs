@@ -12,6 +12,12 @@ public sealed class ExchangeWire(WireTaps taps, string method, string authority,
 	internal OriginWire? Origin { get; set; }
 	internal int ResponseIndex { get; set; }
 
+	/// <summary>True when an earlier request already used the origin connection this one was sent on (HTTP/1.x only).</summary>
+	internal bool OriginConnectionReused => Origin is not null && ResponseIndex > 0;
+
+	/// <summary>The number of the origin connection this request was sent on (HTTP/1.x only), or null.</summary>
+	internal int? OriginConnectionId => Origin?.Id;
+
 	/// <summary>Makes this the exchange whose request is about to be written to an origin, for the rest of the calling async flow.</summary>
 	public void MakeCurrent() => Current.Value = this;
 

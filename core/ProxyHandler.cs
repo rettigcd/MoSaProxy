@@ -46,6 +46,8 @@ public sealed class ProxyHandler : IDisposable {
 	public async Task HandleAsync(HttpContext context) {
 		var request = context.Request;
 		long started = Stopwatch.GetTimestamp();
+		var gotHeaders = DateTimeOffset.UtcNow;
+		var stamps = new Stamps();
 		string rawTarget = context.Features.GetRequiredFeature<IHttpRequestFeature>().RawTarget;
 
 		IExchangeCapture capture;
@@ -69,9 +71,11 @@ public sealed class ProxyHandler : IDisposable {
 		using var tracking = _activity.Track(isWebSocket ? ActivityKind.WebSocket : ActivityKind.Exchange);
 		var counted = new CountingStream(request.Body);
 		var connectionWire = _wireTaps?.ForConnection(context.Connection.Id);
+		bool clientReused = false;
 		ExchangeWire? exchangeWire = null;
 		bool http2 = HttpProtocol.IsHttp2(request.Protocol);
 		int? streamId = http2 ? context.Features.Get<IHttp2StreamIdFeature>()?.StreamId : null;
+		if (!http2) clientReused = connectionWire?.NoteRequestIsReuse() ?? false;
 		long responseBytes = 0;
 		string mode = interceptBase is null ? "plain" : "intercept";
 		string? error = null;
@@ -101,6 +105,20 @@ public sealed class ProxyHandler : IDisposable {
 			Error = recordError,
 			ClientMessages = clientMessages,
 			OriginMessages = originMessages,
+			ClientConnectionReused = clientReused,
+			OriginConnectionReused = exchangeWire?.OriginConnectionReused ?? false,
+			OriginConnectionId = exchangeWire?.OriginConnectionId,
+			ClientPort = context.Connection.RemotePort,
+			ClientTlsVersion = context.Features.Get<IConnectionItemsFeature>()?.Items.TryGetValue(TunnelHandler.ClientTlsVersionKey, out var tlsVersion) == true ? tlsVersion as string : null,
+			Times = new ExchangeTimes {
+				ClientConnected = connectionWire?.Opened,
+				GotRequestHeaders = gotHeaders,
+				ClientDoneRequest = counted.EndReadAt ?? (counted.BytesRead == 0 ? gotHeaders : null),
+				FiddlerBeginRequest = stamps.FiddlerBeginRequest,
+				GotResponseHeaders = stamps.GotResponseHeaders,
+				ClientBeginResponse = stamps.ClientBeginResponse,
+				ClientDoneResponse = stamps.ClientDoneResponse,
+			},
 		};
 
 		try {
@@ -138,7 +156,7 @@ public sealed class ProxyHandler : IDisposable {
 				await RespondAsync(context, capture, 400, interceptBase is null ? "Expected an absolute http:// URL." : "Expected a request path.");
 			}
 			else {
-				responseBytes = await ForwardAsync(context, capture, uri, counted, v => originVersion = v, w => exchangeWire = w);
+				responseBytes = await ForwardAsync(context, capture, uri, counted, stamps, v => originVersion = v, w => exchangeWire = w);
 			}
 		}
 		catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) {
@@ -176,7 +194,7 @@ public sealed class ProxyHandler : IDisposable {
 		}
 	}
 
-	async Task<long> ForwardAsync(HttpContext context, IExchangeCapture capture, Uri uri, CountingStream requestBody, Action<string> reportOriginVersion, Action<ExchangeWire> reportWire) {
+	async Task<long> ForwardAsync(HttpContext context, IExchangeCapture capture, Uri uri, CountingStream requestBody, Stamps stamps, Action<string> reportOriginVersion, Action<ExchangeWire> reportWire) {
 		var request = context.Request;
 		using var upstream = new HttpRequestMessage(new HttpMethod(request.Method), uri);
 
@@ -208,7 +226,9 @@ public sealed class ProxyHandler : IDisposable {
 			wireForExchange.MakeCurrent();
 			reportWire(wireForExchange);
 		}
+		stamps.FiddlerBeginRequest = DateTimeOffset.UtcNow;
 		using var response = await _client.SendAsync(upstream, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+		stamps.GotResponseHeaders = DateTimeOffset.UtcNow;
 		timeout.CancelAfter(Timeout.InfiniteTimeSpan);
 		reportOriginVersion(HttpVersions.Format(response.Version));
 
@@ -233,12 +253,19 @@ public sealed class ProxyHandler : IDisposable {
 		var counted = new CountingStream(context.Response.Body);
 		await using var body = capture.TeeResponseBody(await response.Content.ReadAsStreamAsync(timeout.Token));
 		await body.CopyToAsync(counted, context.RequestAborted);
+		stamps.ClientBeginResponse = counted.FirstWriteAt;
+		stamps.ClientDoneResponse = DateTimeOffset.UtcNow;
 
 		// Trailers (headers after the body, as used by gRPC) can only be passed on when the client connection supports them.
 		if (response.TrailingHeaders.Any() && context.Response.SupportsTrailers())
 			foreach (var trailer in response.TrailingHeaders)
 				context.Response.AppendTrailer(trailer.Key, trailer.Value.ToArray());
 		return counted.BytesWritten;
+	}
+
+	/// <summary>Moments inside ForwardAsync that the record needs, set as the exchange passes them.</summary>
+	sealed class Stamps {
+		public DateTimeOffset? FiddlerBeginRequest, GotResponseHeaders, ClientBeginResponse, ClientDoneResponse;
 	}
 
 	/// <summary>Sends a response the proxy generated itself and records it in the capture.</summary>

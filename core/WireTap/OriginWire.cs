@@ -4,7 +4,10 @@ namespace MoSaProxy;
 /// The bytes an origin sent on one proxy-to-origin connection (after TLS), exactly as they arrived, split into one response per
 /// request. An HTTP/1.1 connection carries one request at a time, so the n-th response answers the n-th request written to it.
 /// </summary>
-sealed class OriginWire(ResourceLimitMonitor limits) : IOriginTap {
+sealed class OriginWire(ResourceLimitMonitor limits, int id) : IOriginTap {
+	/// <summary>A number for this origin connection, counting from 1 in the order the connections were opened.</summary>
+	public int Id { get; } = id;
+
 	readonly object _lock = new();
 	readonly WireBuffer _fromOrigin = new();
 	readonly List<ExchangeWire> _requesters = new();
