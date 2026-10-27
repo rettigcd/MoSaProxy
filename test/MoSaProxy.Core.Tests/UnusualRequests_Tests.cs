@@ -134,7 +134,7 @@ public class UnusualRequests_Tests {
 		string saz = Path.Combine(folder.Path, "binary.saz");
 		SazExporter.Export(proxy.CaptureRunDirectory!, saz);
 		using var zip = System.IO.Compression.ZipFile.OpenRead(saz);
-		using var entry = zip.GetEntry("raw/001_c.txt")!.Open();
+		using var entry = zip.GetEntry("raw/1_c.txt")!.Open();
 		using var copy = new MemoryStream();
 		entry.CopyTo(copy);
 		var exported = copy.ToArray();

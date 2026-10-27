@@ -15,7 +15,7 @@ A `.saz` is an ordinary zip file. Each captured HTTP exchange ("session") is sto
 | `raw/NNN_c.txt` | The **c**lient's request, as bytes: request line, headers, blank line, body. |
 | `raw/NNN_s.txt` | The **s**erver's response, as bytes: status line, headers, blank line, body. |
 | `raw/NNN_m.xml` | **m**etadata: timers, session flags, connection info. XML. |
-| `raw/NNN_w.txt` | Optional. WebSocket messages for that session **(inferred)**. |
+| `raw/NNN_w.txt` | Optional. WebSocket messages for that session (section 5.3). |
 | `raw/NNN_g.txt` | Optional. gRPC messages for that session **(inferred, from Telerik's description of the format)**. |
 
 Two further files sit at the archive root: `_index.htm` (a human-readable table for people who unzip the file) and `[Content_Types].xml`
@@ -33,16 +33,17 @@ so `_index.htm` is a convenience, not data (the loader does not need it, section
 | Writer | "version made by" 5.1, host system FAT (MS-DOS); .NET `System.IO.Compression`-style output with Zip64 extra fields on entries. |
 | Timestamps | All entries carry the save time (the moment the archive was written), not the capture time. |
 | Archive comment | `Fiddler (vX.Y.Z.W) Session Archive. See https://api.getfiddler.com/r/?fiddler` |
-| Encryption | Fiddler can password-protect a `.saz` with zip encryption **(inferred)**; a reader should be prepared for it. |
+| Encryption | The Save dialog of the Fiddler version tested offers no password option, so archives it writes are not encrypted. Other Fiddler builds may encrypt them with zip encryption **(inferred)**. |
 
 ## 3. Numbering and names
 
-- Files are named `NNN_c.txt`, `NNN_s.txt`, `NNN_m.xml` with the session number **zero-padded to 3 digits** (`001`, `002`, ...).
-  What Fiddler writes past 999 sessions (4 digits, or a wider pad chosen from the total) is **(unknown)**. Its loader accepts any width:
-  unpadded and 4-digit numbers load (section 10.1).
+- Files are named `NNN_c.txt`, `NNN_s.txt`, `NNN_m.xml` with the session number **zero-padded to the width of the largest number**: `1_c.txt`
+  in an archive of 6 sessions, `001_c.txt` of 375, `0001_c.txt` of 1100. The links in `_index.htm` use the same width. Whether the width follows
+  the highest session number or the count of sessions is **(unknown)**; the two were equal in every archive examined. Fiddler's loader
+  accepts any width: unpadded and 4-digit numbers load (section 10.1).
 - The number is the session ID (`SID` in the XML). A saved subset of a longer capture may have gaps in the numbering **(inferred)**; the
   `SID` in the XML is the authoritative number.
-- The three files of a session share one number. What Fiddler writes for a session with no response (an empty `_s.txt`, or no file) is **(unknown)**; the loader accepts both (section 10.1).
+- The three files of a session share one number. A session with no response (the client gave up before an answer) still has an `_s.txt`, and it is empty (0 bytes). The loader also accepts a missing one (section 10.1).
 
 ## 4. `NNN_c.txt` - the request
 
@@ -145,6 +146,52 @@ Key Exchange: ECDHE_RSA (0xae06) 256bits\n
   **(inferred)**.
 - These are not the tunnel's bytes. Fiddler does not store the encrypted traffic.
 
+### 5.2 A response Fiddler generates
+
+When Fiddler cannot reach the origin it writes the response itself, with a reason phrase of its own, a `Timestamp:` header (local time,
+`HH:mm:ss.fff`) and an HTML body:
+
+```
+HTTP/1.1 502 Fiddler - Connection Failed\r\n
+Date: Tue, 27 Oct 2026 17:26:25 GMT\r\n
+Content-Type: text/html; charset=UTF-8\r\n
+Connection: close\r\n
+Cache-Control: no-cache, must-revalidate\r\n
+Timestamp: 13:26:25.319\r\n
+\r\n
+[Fiddler] The connection to '127.0.0.1' failed. <br />Error: ConnectionRefused (0x274d). <br />System.Net.Sockets.SocketException ...
+```
+
+The session's `BitFlags` is `0x100` (ResponseGeneratedByFiddler), and its flags include `x-failsession-when` and `x-aborted-when` (both
+`SendingRequest` here) and `x-dns-failover`.
+
+### 5.3 `NNN_w.txt` - WebSocket messages
+
+Optional; present for a session that became a WebSocket. It holds one record per WebSocket frame, in order, for both directions. A record is:
+
+```
+\r\n
+Request-Length: 11\r\n
+ID: 1\r\n
+BitFlags: 0\r\n
+DoneRead: 2026-10-27T13:26:56.0114235-04:00\r\n
+BeginSend: 2026-10-27T13:26:56.0114235-04:00\r\n
+DoneSend: 2026-10-27T13:26:56.0114235-04:00\r\n
+\r\n
+<Length bytes: the frame exactly as it crossed the wire>
+```
+
+- The first line is `Request-Length:` for a frame the client sent and `Response-Length:` for one the origin sent. The number is the frame's
+  size in bytes.
+- `ID` counts the frames of the session from 1, both directions together. `BitFlags` was `0` for every frame examined (its meaning is
+  **(unknown)**). The three timestamps use the same format as the session timers.
+- The frame bytes follow the blank line directly and are raw WebSocket framing: a 2-byte header, then (for a client frame) a 4-byte mask key
+  and the masked payload. For example, the text `hello` echoed by the origin is 7 bytes (`81 05 68 65 6c 6c 6f`) and the same text sent by
+  the client is 11 bytes. Binary frames and the close frame (`88 ...`) are included.
+- The next record starts immediately after the last frame byte, with its own leading `\r\n`.
+- A session with a `_w.txt` has `_s.txt` holding the `101 Switching Protocols` response, and a `BitFlags` of `0x40018` (IsWebSocketTunnel plus
+  both connections reused). The `CONNECT` request that carried it (when the client used a proxy for `ws://`) is a separate session.
+
 ## 6. `NNN_m.xml` - session metadata
 
 UTF-8 **with a BOM** (`EF BB BF`), CRLF line breaks, two-space indent, **no trailing newline** after `</Session>`.
@@ -203,11 +250,19 @@ Values that Fiddler writes, decoded with that table:
 |---|---|---|
 | `0x2100` | A CONNECT tunnel that Fiddler decrypted | IsDecryptingTunnel + ResponseGeneratedByFiddler. Fully explained. |
 | `0x1100` | A CONNECT tunnel passed through undecrypted | IsBlindTunnel + ResponseGeneratedByFiddler. Fully explained. |
-| `0x13` | A request decrypted inside a tunnel, on a reused origin connection | IsHTTPS + ServerPipeReused + `0x2`, which the table calls IsFTP and which makes no sense on an HTTPS request. **`0x2` is unexplained.** ClientPipeReused (`0x8`) is absent although `PipeInfo` says `CltReuse="true"`. |
+| `0x19` | A request decrypted inside a tunnel (every one, including the first in a tunnel) | IsHTTPS + ClientPipeReused + ServerPipeReused. The CONNECT counts as the first use of both connections, so `PipeInfo` has `CltReuse="true" Reused="true"` and `x-serversocket` is `REUSE ServerPipe#N` even for the first request. Fully explained. |
+| `0x13` | A request decrypted inside a tunnel, seen once in another archive | IsHTTPS + ServerPipeReused + `0x2`, which the table calls IsFTP and which makes no sense on an HTTPS request. **`0x2` is unexplained**, and ClientPipeReused (`0x8`) is absent although `PipeInfo` says `CltReuse="true"`. Not reproduced by later captures, which gave `0x19`. |
 | `0x51` | A direct HTTPS request (no CONNECT) on a new connection | IsHTTPS + ServerPipeReused + ResponseStreamed. `PipeInfo` shows no reuse, so **`0x10` is unexplained** here. |
+| `0x0` | A plain HTTP request on new connections | No bits: there is no IsHTTPS bit. |
+| `0x10` | A plain HTTP request on a new client connection whose origin connection was reused | ServerPipeReused. |
+| `0x18` | A plain HTTP request on a reused client connection and a reused origin connection | ClientPipeReused + ServerPipeReused. |
+| `0x100` | A session whose response Fiddler generated (a 502 for a failed connection, section 5.2) | ResponseGeneratedByFiddler. |
+| `0x40018` | A WebSocket session (section 5.3) | IsWebSocketTunnel + ClientPipeReused + ServerPipeReused. |
+| `0x200100` | A CONNECT to a non-TLS port whose tunnel then carried a WebSocket handshake | ResponseGeneratedByFiddler + `0x200000`, which the table names IsRPCTunnel. **`0x200000` is unexplained** for this kind of tunnel. |
 
-So the published table explains the tunnel values but not every bit Fiddler writes on ordinary requests. The value for a plain HTTP
-session is **(unknown)**; by the table it would carry no IsHTTPS bit.
+For plain HTTP the two reuse bits follow `PipeInfo` exactly (section 6.4). The published table explains every value above except the bits
+marked unexplained; they are the `0x2` in the one `0x13` value, the `0x10` on a direct HTTPS request on a new connection, and
+the `0x200000` on a CONNECT to a plain tunnel.
 
 ### 6.3 `SessionTimers`
 
@@ -246,8 +301,9 @@ Always present, either an empty element or with these attributes:
 |---|---|
 | `<PipeInfo />` | A fresh connection. |
 | `<PipeInfo CltReuse="true" Reused="true" />` | The client's connection and the server connection were both reused (keep-alive). |
+| `<PipeInfo Reused="true" />` | A new client connection whose server connection was reused (Fiddler pools origin connections across clients). |
 
-Other attributes (for example a lone `Reused`, or `CltReuse` only) are **(unknown)**.
+A lone `CltReuse` (a reused client connection with a new server connection) was not seen and is **(unknown)**.
 
 ### 6.5 `TunnelInfo`
 
@@ -271,24 +327,30 @@ Flags Fiddler writes:
 | `x-processinfo` | Sessions from a client process | `process:pid` of the client (`chrome:33556`). |
 | `x-supported-client-alpn` | Sessions from a client process | ALPN list the client offered (`h2, http/1.1`). |
 | `x-supported-client-tls-protocols` | Sessions from a client process | Bit mask of TLS versions the client offered (`15360`). |
-| `https-client-version` | Sessions from a client process | TLS version negotiated with the client (`Tls13`). |
+| `https-client-version` | Sessions from a client process | TLS version negotiated with the client (`Tls13`); `None` for a request that did not arrive over TLS. |
 | `https-client-snihostname` | CONNECT sessions | SNI the client sent. |
 | `https-client-sessionid` | CONNECT sessions | TLS session ID, hex pairs separated by spaces. |
 | `https-server-version` | Sessions where Fiddler completed a TLS handshake with the origin | TLS version negotiated with the origin (`Tls12`). |
 | `https-server-cipher` | Same | Cipher negotiated with the origin (`Aes128 128bits`). |
 | `https-server-sessionid` | Requests Fiddler made itself | TLS session ID of the origin connection. |
-| `x-serversocket` | Requests that reused an origin connection | `REUSE ServerPipe#37`: the connection pool entry the request used. The form for a new connection is **(unknown)**; no flag was written for those. |
+| `x-serversocket` | Requests that reused an origin connection | `REUSE ServerPipe#37`: the connection pool entry the request used. No flag is written for a request on a new origin connection. |
 | `x-autoauth` | Requests Fiddler made itself | `(default)`. |
 | `x-builder-maxredir` | Requests Fiddler made itself | `3`. |
 | `x-overridesslprotocols` | Requests Fiddler made itself | `tls1.0;tls1.1;tls1.2`. |
+| `x-usedvirtualhost` | Requests sent to a Fiddler host alias | The alias used (`ipv4.fiddler`), where the URL shows the address it stands for **(inferred)**. |
+| `x-overridecertcn` | CONNECT sessions to a host alias | The alias (`ipv4.fiddler`); presumably the name the generated certificate was issued for **(inferred)**. |
+| `x-failsession-when`, `x-aborted-when` | Sessions that failed (the origin could not be reached) | The stage at which it failed (`SendingRequest`). |
+| `x-dns-failover` | Sessions that failed to connect | `+1`. Its meaning is **(unknown)**. |
 
 Flags that control how a session is shown. Fiddler reads these from the metadata when it loads an archive and applies them:
 
 | Name | Value | Effect |
 |---|---|---|
-| `ui-color` | A colour name (`red`) | Text colour of the session's row. |
+| `ui-color` | A colour name (`Red`, `Gold`) | Text colour of the session's row. Fiddler's Mark command writes it. |
+| `ui-oldcolor` | A colour name (`WindowText`, `ForestGreen`) | The text colour the row had before it was marked; written together with `ui-color`. |
 | `ui-backcolor` | A colour name (`LightYellow`) | Background colour of the row. |
-| `ui-bold` | `true` | Row shown in bold. |
+| `ui-bold` | `user-marked` when written by Fiddler's Mark command; the loader reads `true` (section 10.1) | Row shown in bold. |
+| `ui-strikeout` | `hotkey` | Row shown struck through. Fiddler wrote it on most sessions of an archive in which the user had pressed the delete hotkey on them. |
 | `ui-comments` | Free text | The session's text in the Comments column. |
 
 Other flags that Fiddler writes in other situations **(inferred)**: `x-breakrequest`, `x-breakresponse`, `x-replaceonrequest`,
@@ -382,9 +444,9 @@ is the one thing found so far that a session cannot load with (section 4). Not t
 
 The loader's tolerance of the container (what it requires and ignores) is settled in section 10.1. What remains is what Fiddler itself writes.
 
-1. Width of the zero padding that Fiddler writes past 999 sessions. (The loader accepts any width.)
-2. The `0x2` bit Fiddler sets on decrypted requests, and the `0x10` on a non-reused direct HTTPS request (section 6.2).
-3. The exact form of `_w.txt` (WebSocket messages), and any `ui-*` flags beyond `ui-color`, `ui-backcolor` and `ui-bold`; neither is documented.
-4. Password-protected archives: the encryption method and how the password is requested.
-5. Whether Fiddler writes an empty `_s.txt` or omits the file for a session with no response. (The loader accepts both.)
-6. The `BitFlags` value of a plain HTTP session, and the `x-serversocket` form for a request on a new origin connection.
+1. Whether the zero-padding width of the file names follows the highest session number or the count of sessions (section 3).
+2. The `0x2` bit in the `0x13` value (later captures of decrypted requests, on new and reused origin connections, gave `0x19` with no `0x2`), the `0x10` on a direct HTTPS request on a new connection, and the `0x200000` on a
+   CONNECT to a plain (non-TLS) tunnel (section 6.2).
+3. Whether Fiddler writes `ui-backcolor` and in what form (its Mark command wrote `ui-color` and `ui-bold` and no background colour).
+4. Whether a `PipeInfo` with `CltReuse="true"` and no `Reused` exists.
+5. The meaning of the `BitFlags` field in each `_w.txt` record (always `0` so far) and of the `x-dns-failover` flag.

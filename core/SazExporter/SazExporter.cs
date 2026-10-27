@@ -48,6 +48,8 @@ public static class SazExporter {
 		// Build beside the final name and rename, so a failed export never leaves a half-written archive under the real name.
 		string temp = outputPath + ".tmp";
 		var rows = new List<IndexRow>();
+		// Fiddler pads the session numbers in the file names to the width of the highest one (1_c.txt for 6 sessions, 0001_c.txt for 1100).
+		int width = numbers[^1].ToString().Length;
 		try {
 			using (var file = File.Create(temp))
 			using (var zip = new ZipArchive(file, ZipArchiveMode.Create)) {
@@ -56,14 +58,14 @@ public static class SazExporter {
 				zip.CreateEntry("raw/", CompressionLevel.Optimal);
 				foreach (int number in numbers) {
 					var exchange = ReadExchange(number, runDirectory);
-					AddRequestFile(zip, runDirectory, exchange);
-					AddFile(zip, runDirectory, number, "s.txt");
-					AddBytes(zip, ArchivePath(number, "m.xml"), FiddlerMetadata(exchange));
-					AddFile(zip, runDirectory, number, "w.txt");
+					AddRequestFile(zip, runDirectory, exchange, width);
+					AddResponseFile(zip, runDirectory, number, width);
+					AddBytes(zip, ArchivePath(number, "m.xml", width), FiddlerMetadata(exchange));
+					AddFile(zip, runDirectory, number, "w.txt", width);
 					var (caching, contentType) = ReadIndexHeaders(Path.Combine(runDirectory, $"{number}_s.txt"));
 					rows.Add(new IndexRow(exchange, ReadRequestLine(Path.Combine(runDirectory, $"{number}_c.txt")), caching, contentType));
 				}
-				AddBytes(zip, "_index.htm", new UTF8Encoding(encoderShouldEmitUTF8Identifier: true).GetPreamble().Concat(Encoding.UTF8.GetBytes(IndexPage(rows))).ToArray());   // with a byte-order mark, as Fiddler writes it
+				AddBytes(zip, "_index.htm", new UTF8Encoding(encoderShouldEmitUTF8Identifier: true).GetPreamble().Concat(Encoding.UTF8.GetBytes(IndexPage(rows, width))).ToArray());   // with a byte-order mark, as Fiddler writes it
 				AddText(zip, "[Content_Types].xml", ContentTypes);
 			}
 			File.Move(temp, outputPath, overwrite: true);
@@ -75,7 +77,7 @@ public static class SazExporter {
 	}
 
 	/// <summary>The path inside the archive. Fiddler zero-pads the session number to at least three digits (raw/001_c.txt).</summary>
-	static string ArchivePath(int number, string suffix) => $"raw/{number:D3}_{suffix}";
+	static string ArchivePath(int number, string suffix, int width) => $"raw/{number.ToString("D" + width)}_{suffix}";
 
 	// ---- reading MoSaProxy's own metadata -------------------------------------------------------------------------------
 
@@ -83,7 +85,12 @@ public static class SazExporter {
 		int Number, DateTimeOffset End, double DurationMs, string Client, string Method, string Url, string Host, int Port, string Scheme,
 		string ClientProtocol, string OriginProtocol, string Status, long RequestBytes, long ResponseBytes, string Mode, string Error,
 		string ClientMessages, string OriginMessages, bool Truncated, string RequestSource, string ResponseSource, bool ClientReused, bool OriginReused,
-		IReadOnlyDictionary<string, DateTimeOffset> Times, int ClientPort, int OriginConnectionId, string ClientTlsVersion);
+		IReadOnlyDictionary<string, DateTimeOffset> Times, int ClientPort, int OriginConnectionId, string ClientTlsVersion) {
+		// Fiddler counts the CONNECT as the first use of both connections, so a request decrypted inside a tunnel always shows them as reused
+		bool InTunnel => Scheme == "https" && Method != "CONNECT";
+		public bool ClientPipeReused => ClientReused || InTunnel;
+		public bool ServerPipeReused => OriginReused || InTunnel;
+	}
 
 	record IndexRow(Exchange Exchange, string RequestLine, string Caching, string ContentType);
 
@@ -138,11 +145,12 @@ public static class SazExporter {
 		ResponseGeneratedByFiddler = 0x100,
 		IsBlindTunnel = 0x1000,
 		IsDecryptingTunnel = 0x2000,
+		IsWebSocketTunnel = 0x40000,
 	}
 
 	/// <summary>
 	/// Fiddler's BitFlags value, written in hex. A CONNECT's response is made by the proxy itself, so it carries ResponseGeneratedByFiddler and
-	/// the kind of tunnel; any other session is IsHTTPS when its URL is https, plus the two pipe-reuse bits. Fiddler also sets streaming bits
+	/// the kind of tunnel; any other session is IsHTTPS when its URL is https, plus the two pipe-reuse bits, and IsWebSocketTunnel for a WebSocket. Fiddler also sets streaming bits
 	/// that MoSaProxy does not record, and one it writes on every decrypted request (0x2) that the published list does not explain;
 	/// those are left out (docs/specs/saz-format.md section 6.2).
 	/// </summary>
@@ -153,8 +161,9 @@ public static class SazExporter {
 			_ => FiddlerBits.None,
 		};
 		return (e.Scheme == "https" ? FiddlerBits.IsHTTPS : FiddlerBits.None)
-			| (e.ClientReused ? FiddlerBits.ClientPipeReused : FiddlerBits.None)
-			| (e.OriginReused ? FiddlerBits.ServerPipeReused : FiddlerBits.None);
+			| (e.ClientPipeReused ? FiddlerBits.ClientPipeReused : FiddlerBits.None)
+			| (e.ServerPipeReused ? FiddlerBits.ServerPipeReused : FiddlerBits.None)
+			| (e.Mode.StartsWith("websocket") ? FiddlerBits.IsWebSocketTunnel : FiddlerBits.None);
 	}
 
 	/// <summary>
@@ -184,11 +193,12 @@ public static class SazExporter {
 		void Flag(string name, string value) { if (value.Length > 0) flags.Add(KeyValuePair.Create(name, value)); }
 		Flag("x-clientip", e.Client);
 		if (e.ClientPort > 0) Flag("x-clientport", e.ClientPort.ToString());
-		Flag("https-client-version", e.ClientTlsVersion);
+		// (Fiddler writes "None" for a request that did not arrive over TLS)
+		Flag("https-client-version", e.ClientTlsVersion.Length > 0 ? e.ClientTlsVersion : e.Scheme == "http" && e.Method != "CONNECT" ? "None" : "");
 		// the response body as it crossed the wire, with thousands separators; a tunnel's bytes are in TunnelInfo, not here
 		Flag("x-responsebodytransferlength", (e.Method == "CONNECT" ? 0 : e.ResponseBytes).ToString("N0", System.Globalization.CultureInfo.InvariantCulture));
 		// Fiddler names the origin connection a request reused, and writes nothing for a request that opened its own
-		if (e.OriginReused && e.OriginConnectionId > 0) Flag("x-serversocket", $"REUSE ServerPipe#{e.OriginConnectionId}");
+		if (e.ServerPipeReused && e.OriginConnectionId > 0) Flag("x-serversocket", $"REUSE ServerPipe#{e.OriginConnectionId}");
 		Flag("x-mosaproxy-mode", e.Mode);
 		Flag("x-mosaproxy-client-protocol", e.ClientProtocol);
 		Flag("x-mosaproxy-origin-protocol", e.OriginProtocol);
@@ -208,7 +218,7 @@ public static class SazExporter {
 				T("ServerConnected", requestToOrigin), T("FiddlerBeginRequest", requestToOrigin), T("ServerGotRequest", requestToOrigin > doneRequest ? requestToOrigin : doneRequest),
 				ResponseT("ServerBeginResponse", gotResponse), ResponseT("GotResponseHeaders", gotResponse), ResponseT("ServerDoneResponse", doneResponse),
 				T("ClientBeginResponse", At("ClientBeginResponse", gotResponse)), T("ClientDoneResponse", doneResponse)),
-			new XElement("PipeInfo", e.ClientReused ? new XAttribute("CltReuse", "true") : null, e.OriginReused ? new XAttribute("Reused", "true") : null),
+			new XElement("PipeInfo", e.ClientPipeReused ? new XAttribute("CltReuse", "true") : null, e.ServerPipeReused ? new XAttribute("Reused", "true") : null),
 			e.Method == "CONNECT" ? new XElement("TunnelInfo", new XAttribute("BytesEgress", e.RequestBytes), new XAttribute("BytesIngress", e.ResponseBytes)) : null,
 			new XElement("SessionFlags", flags.Select(f => new XElement("SessionFlag", new XAttribute("N", f.Key), new XAttribute("V", f.Value)))));
 
@@ -224,7 +234,7 @@ public static class SazExporter {
 	/// The page Fiddler writes for people who unzip the archive: one line, twelve columns, each row linking its three files (with backslashes).
 	/// MoSaProxy does not record the client process, comments or custom columns, so those cells are empty.
 	/// </summary>
-	static string IndexPage(IReadOnlyList<IndexRow> rows) {
+	static string IndexPage(IReadOnlyList<IndexRow> rows, int width) {
 		string H(string text) => WebUtility.HtmlEncode(text);
 		var page = new StringBuilder();
 		page.Append("<html><head><style>body,thead,td,a,p{font-family:verdana,sans-serif;font-size: 10px;}</style></head><body><table cols=12><thead><tr>")
@@ -243,7 +253,7 @@ public static class SazExporter {
 				host = slash < 0 ? rest : rest[..slash];
 				path = slash < 0 ? "/" : rest[slash..];
 			}
-			string Link(string suffix) => ArchivePath(e.Number, suffix).Replace('/', (char)92);   // Fiddler's links use backslashes
+			string Link(string suffix) => ArchivePath(e.Number, suffix, width).Replace('/', (char)92);   // Fiddler's links use backslashes
 			page.Append($"<tr><td><a href='{Link("c.txt")}'>C</a>&nbsp;<a href='{Link("s.txt")}'>S</a>&nbsp;<a href='{Link("m.xml")}'>M</a></td>")
 				.Append($"<td>{e.Number}</td><td>{H(e.Status)}</td><td>{(tunnel ? "HTTP" : H(e.Scheme.ToUpperInvariant()))}</td><td>{H(host)}</td><td>{H(path)}</td>")
 				.Append($"<td>{e.ResponseBytes.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)}</td><td>{H(row.Caching)}</td><td>{H(row.ContentType)}</td><td></td><td></td><td></td></tr>");
@@ -274,10 +284,16 @@ public static class SazExporter {
 
 	// ---- zip helpers ---------------------------------------------------------------------------------------------
 
+	/// <summary>Copies the response file into the archive. A session with no response (the client gave up, say) gets an empty file, as Fiddler writes one.</summary>
+	static void AddResponseFile(ZipArchive zip, string runDirectory, int number, int width) {
+		if (File.Exists(Path.Combine(runDirectory, $"{number}_s.txt"))) AddFile(zip, runDirectory, number, "s.txt", width);
+		else zip.CreateEntry(ArchivePath(number, "s.txt", width), CompressionLevel.Optimal);
+	}
+
 	/// <summary>Copies a capture file into the archive unchanged, if the exchange has one.</summary>
-	static void AddFile(ZipArchive zip, string runDirectory, int number, string suffix) {
+	static void AddFile(ZipArchive zip, string runDirectory, int number, string suffix, int width) {
 		string source = Path.Combine(runDirectory, $"{number}_{suffix}");
-		if (File.Exists(source)) zip.CreateEntryFromFile(source, ArchivePath(number, suffix), CompressionLevel.Optimal);
+		if (File.Exists(source)) zip.CreateEntryFromFile(source, ArchivePath(number, suffix, width), CompressionLevel.Optimal);
 	}
 
 	/// <summary>
@@ -285,7 +301,7 @@ public static class SazExporter {
 	/// URL (<c>GET https://host/path HTTP/1.1</c>), where the client sent only the path; the capture file holds what the client sent, so the
 	/// first line is rewritten here and every other byte is copied unchanged.
 	/// </summary>
-	static void AddRequestFile(ZipArchive zip, string runDirectory, Exchange e) {
+	static void AddRequestFile(ZipArchive zip, string runDirectory, Exchange e, int width) {
 		string source = Path.Combine(runDirectory, $"{e.Number}_c.txt");
 		if (!File.Exists(source)) return;
 		using var input = File.OpenRead(source);
@@ -296,7 +312,7 @@ public static class SazExporter {
 		// short enough to have been read whole and has none (the client sent something that is not HTTP, or stopped part way through its
 		// headers) is made loadable, so that the session appears.
 		if (read < start.Length && start.AsSpan(0, read).IndexOf("\r\n\r\n"u8) < 0) {
-			using var repaired = zip.CreateEntry(ArchivePath(e.Number, "c.txt"), CompressionLevel.Optimal).Open();
+			using var repaired = zip.CreateEntry(ArchivePath(e.Number, "c.txt", width), CompressionLevel.Optimal).Open();
 			repaired.Write(LoadableRequest(start.AsSpan(0, read)));
 			return;
 		}
@@ -304,7 +320,7 @@ public static class SazExporter {
 		int eol = start.AsSpan(0, read).IndexOf("\r\n"u8);
 		string? line = eol > 0 ? AbsoluteRequestLine(Encoding.Latin1.GetString(start, 0, eol), e) : null;
 
-		using var output = zip.CreateEntry(ArchivePath(e.Number, "c.txt"), CompressionLevel.Optimal).Open();
+		using var output = zip.CreateEntry(ArchivePath(e.Number, "c.txt", width), CompressionLevel.Optimal).Open();
 		if (line is null) output.Write(start, 0, read);
 		else {
 			output.Write(Encoding.Latin1.GetBytes(line));

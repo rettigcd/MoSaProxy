@@ -64,7 +64,7 @@ public class SazExporter_Tests {
 		sessions.ShouldBe(2);
 		using var zip = Open(saz);
 		zip.Entries.Select(e => e.FullName).Order().ShouldBe(new[] {
-			"[Content_Types].xml", "_index.htm", "raw/", "raw/001_c.txt", "raw/001_m.xml", "raw/001_s.txt", "raw/002_c.txt", "raw/002_m.xml", "raw/002_s.txt", "raw/002_w.txt",
+			"[Content_Types].xml", "_index.htm", "raw/", "raw/1_c.txt", "raw/1_m.xml", "raw/1_s.txt", "raw/2_c.txt", "raw/2_m.xml", "raw/2_s.txt", "raw/2_w.txt",
 		}.Order());
 		var types = ReadXml(zip, "[Content_Types].xml");
 		types.Elements().Select(e => e.Attribute("Extension")!.Value).Order().ShouldBe(new[] { "htm", "txt", "xml" });
@@ -85,7 +85,7 @@ public class SazExporter_Tests {
 		// Then: every response and WebSocket file, and the first request (which already has an absolute URL), is byte-for-byte the one in the folder
 		using var zip = Open(saz);
 		foreach (var name in new[] { "1_c.txt", "1_s.txt", "2_s.txt", "2_w.txt" })
-			ReadBytes(zip, $"raw/00{name}").ShouldBe(File.ReadAllBytes(Path.Combine(run, name)));
+			ReadBytes(zip, $"raw/{name}").ShouldBe(File.ReadAllBytes(Path.Combine(run, name)));
 	}
 
 	[Fact]
@@ -99,7 +99,7 @@ public class SazExporter_Tests {
 		// When: it is exported and the first session's metadata is read
 		SazExporter.Export(run, saz);
 		using var zip = Open(saz);
-		var session = ReadXml(zip, "raw/001_m.xml");
+		var session = ReadXml(zip, "raw/1_m.xml");
 		var timers = session.Element("SessionTimers")!;
 		var flags = session.Element("SessionFlags")!.Elements("SessionFlag").ToDictionary(f => f.Attribute("N")!.Value, f => f.Attribute("V")!.Value);
 
@@ -130,7 +130,7 @@ public class SazExporter_Tests {
 		// When: it is exported and a session's metadata file is read as bytes
 		SazExporter.Export(run, saz);
 		using var zip = Open(saz);
-		var bytes = ReadBytes(zip, "raw/001_m.xml");
+		var bytes = ReadBytes(zip, "raw/1_m.xml");
 		string text = new UTF8Encoding(false).GetString(bytes, 3, bytes.Length - 3);
 
 		// Then: it starts with a UTF-8 byte-order mark, every line break is CRLF, and nothing follows the closing tag
@@ -151,7 +151,7 @@ public class SazExporter_Tests {
 		// When: it is exported and the second session's flags are read
 		SazExporter.Export(run, saz);
 		using var zip = Open(saz);
-		var flags = ReadXml(zip, "raw/002_m.xml").Element("SessionFlags")!.Elements("SessionFlag").ToDictionary(f => f.Attribute("N")!.Value, f => f.Attribute("V")!.Value);
+		var flags = ReadXml(zip, "raw/2_m.xml").Element("SessionFlags")!.Elements("SessionFlag").ToDictionary(f => f.Attribute("N")!.Value, f => f.Attribute("V")!.Value);
 
 		// Then: the counts and mode are recorded
 		flags["x-mosaproxy-client-messages"].ShouldBe("1");
@@ -173,7 +173,7 @@ public class SazExporter_Tests {
 
 		// Then: the archive still has a metadata file for that session, numbered correctly
 		using var zip = Open(saz);
-		ReadXml(zip, "raw/001_m.xml").Attribute("SID")!.Value.ShouldBe("1");
+		ReadXml(zip, "raw/1_m.xml").Attribute("SID")!.Value.ShouldBe("1");
 	}
 
 	[Fact]
@@ -212,8 +212,8 @@ public class SazExporter_Tests {
 		// Then: the index page lists exchange 9 before exchange 10 (numeric, not alphabetical, order)
 		using var zip = Open(saz);
 		var index = Encoding.UTF8.GetString(ReadBytes(zip, "_index.htm"));
-		index.IndexOf(@"raw\009_c.txt", StringComparison.Ordinal).ShouldBeLessThan(index.IndexOf(@"raw\010_c.txt", StringComparison.Ordinal));
-		index.IndexOf(@"raw\002_c.txt", StringComparison.Ordinal).ShouldBeLessThan(index.IndexOf(@"raw\010_c.txt", StringComparison.Ordinal));
+		index.IndexOf(@"raw\09_c.txt", StringComparison.Ordinal).ShouldBeLessThan(index.IndexOf(@"raw\10_c.txt", StringComparison.Ordinal));
+		index.IndexOf(@"raw\02_c.txt", StringComparison.Ordinal).ShouldBeLessThan(index.IndexOf(@"raw\10_c.txt", StringComparison.Ordinal));
 	}
 
 	[Fact]
@@ -235,9 +235,9 @@ public class SazExporter_Tests {
 
 		// Then: both sessions have a PipeInfo element after the timers, only the CONNECT has TunnelInfo (with its byte counts), and SessionFlags comes last
 		using var zip = Open(saz);
-		var getSession = ReadXml(zip, "raw/001_m.xml");
+		var getSession = ReadXml(zip, "raw/1_m.xml");
 		getSession.Elements().Select(x => x.Name.LocalName).ShouldBe(new[] { "SessionTimers", "PipeInfo", "SessionFlags" });
-		var connectSession = ReadXml(zip, "raw/002_m.xml");
+		var connectSession = ReadXml(zip, "raw/2_m.xml");
 		connectSession.Elements().Select(x => x.Name.LocalName).ShouldBe(new[] { "SessionTimers", "PipeInfo", "TunnelInfo", "SessionFlags" });
 		connectSession.Element("TunnelInfo")!.Attribute("BytesEgress")!.Value.ShouldBe("100");
 		connectSession.Element("TunnelInfo")!.Attribute("BytesIngress")!.Value.ShouldBe("200");
@@ -247,7 +247,7 @@ public class SazExporter_Tests {
 	[InlineData("CONNECT", "intercept", "https", "2100")]  // IsDecryptingTunnel + ResponseGeneratedByFiddler
 	[InlineData("CONNECT", "tunnel", "https", "1100")]     // IsBlindTunnel + ResponseGeneratedByFiddler
 	[InlineData("CONNECT", "rejected", "https", "100")]    // ResponseGeneratedByFiddler only
-	[InlineData("GET", "intercept", "https", "1")]         // IsHTTPS
+	[InlineData("GET", "intercept", "https", "19")]        // IsHTTPS + ClientPipeReused + ServerPipeReused: the CONNECT used both connections first
 	[InlineData("GET", "plain", "http", "0")]
 	public void Export_BitFlags_FollowTheKindOfSession(string method, string mode, string scheme, string expected) {
 
@@ -264,7 +264,7 @@ public class SazExporter_Tests {
 
 		// Then: the session's BitFlags is the hex value Fiddler wrote for that kind of session
 		using var zip = Open(saz);
-		ReadXml(zip, "raw/001_m.xml").Attribute("BitFlags")!.Value.ShouldBe(expected);
+		ReadXml(zip, "raw/1_m.xml").Attribute("BitFlags")!.Value.ShouldBe(expected);
 	}
 
 	[Fact]
@@ -294,7 +294,7 @@ public class SazExporter_Tests {
 		string index = new UTF8Encoding(false).GetString(bytes, 3, bytes.Length - 3);
 		index.ShouldStartWith("<html><head><style>body,thead,td,a,p{font-family:verdana,sans-serif;font-size: 10px;}</style></head><body><table cols=12><thead><tr>");
 		index.ShouldContain("<th>&nbsp;</th><th>#</th><th>Result</th><th>Protocol</th><th>Host</th><th>URL</th><th>Body</th><th>Caching</th><th>Content-Type</th><th>Process</th><th>Comments</th><th>Custom</th>");
-		index.ShouldContain(@"<tr><td><a href='raw\001_c.txt'>C</a>&nbsp;<a href='raw\001_s.txt'>S</a>&nbsp;<a href='raw\001_m.xml'>M</a></td>"
+		index.ShouldContain(@"<tr><td><a href='raw\1_c.txt'>C</a>&nbsp;<a href='raw\1_s.txt'>S</a>&nbsp;<a href='raw\1_m.xml'>M</a></td>"
 			+ "<td>1</td><td>200</td><td>HTTPS</td><td>a.test</td><td>/p?q=1&amp;r=2</td><td>12,345</td><td>max-age=900; Expires: Tue, 27 Oct 2026 12:27:47 GMT</td><td>text/html; charset=utf-8</td><td></td><td></td><td></td></tr>");
 		index.ShouldContain("<td>2</td><td>200</td><td>HTTP</td><td>Tunnel to</td><td>b.test:443</td><td>0</td>");
 		index.ShouldEndWith("</tbody></table></body></html>");
@@ -378,7 +378,7 @@ public class SazExporter_Tests {
 		// Then: the entries are the raw folder, each session's request, response and metadata (then WebSocket messages), the index, and the content types last
 		using var zip = Open(saz);
 		zip.Entries.Select(e => e.FullName).ShouldBe(new[] {
-			"raw/", "raw/001_c.txt", "raw/001_s.txt", "raw/001_m.xml", "raw/002_c.txt", "raw/002_s.txt", "raw/002_m.xml", "raw/002_w.txt", "_index.htm", "[Content_Types].xml",
+			"raw/", "raw/1_c.txt", "raw/1_s.txt", "raw/1_m.xml", "raw/2_c.txt", "raw/2_s.txt", "raw/2_m.xml", "raw/2_w.txt", "_index.htm", "[Content_Types].xml",
 		});
 	}
 
@@ -429,7 +429,7 @@ public class SazExporter_Tests {
 
 		// Then: each timer has its own moment, and the ones the proxy cannot observe take the nearest moment it can
 		using var zip = Open(saz);
-		var timers = ReadXml(zip, "raw/001_m.xml").Element("SessionTimers")!;
+		var timers = ReadXml(zip, "raw/1_m.xml").Element("SessionTimers")!;
 		DateTimeOffset At(string name) => DateTimeOffset.Parse(timers.Attribute(name)!.Value);
 		At("ClientConnected").ShouldBe(t0);
 		At("ClientBeginRequest").ShouldBe(t0.AddMilliseconds(10));
@@ -460,7 +460,7 @@ public class SazExporter_Tests {
 
 		// Then: the three server-response timers are Fiddler's "never happened" value, as in a Fiddler-written tunnel
 		using var zip = Open(saz);
-		var timers = ReadXml(zip, "raw/001_m.xml").Element("SessionTimers")!;
+		var timers = ReadXml(zip, "raw/1_m.xml").Element("SessionTimers")!;
 		foreach (var name in new[] { "ServerBeginResponse", "GotResponseHeaders", "ServerDoneResponse" })
 			timers.Attribute(name)!.Value.ShouldBe("0001-01-01T00:00:00", name);
 		timers.Attribute("ClientDoneResponse")!.Value.ShouldNotBe("0001-01-01T00:00:00");
@@ -485,7 +485,7 @@ public class SazExporter_Tests {
 
 		// Then: the timers are in order, and the wait for the origin shows between sending the request and getting the response headers
 		using var zip = Open(saz);
-		var timers = ReadXml(zip, "raw/001_m.xml").Element("SessionTimers")!;
+		var timers = ReadXml(zip, "raw/1_m.xml").Element("SessionTimers")!;
 		DateTimeOffset At(string name) => DateTimeOffset.Parse(timers.Attribute(name)!.Value);
 		At("ClientConnected").ShouldBeLessThanOrEqualTo(At("GotRequestHeaders"));
 		At("GotRequestHeaders").ShouldBeLessThanOrEqualTo(At("FiddlerBeginRequest"));
@@ -519,7 +519,7 @@ public class SazExporter_Tests {
 
 		// Then: the request line has the absolute URL Fiddler writes, and the headers and body are exactly as captured
 		using var zip = Open(saz);
-		Encoding.Latin1.GetString(ReadBytes(zip, "raw/001_c.txt")).ShouldBe(expected + rest);
+		Encoding.Latin1.GetString(ReadBytes(zip, "raw/1_c.txt")).ShouldBe(expected + rest);
 	}
 
 	[Fact]
@@ -543,7 +543,7 @@ public class SazExporter_Tests {
 		// Then: the archive holds the rewritten line followed by the whole head and body, byte for byte
 		using var zip = Open(saz);
 		var expected = Encoding.Latin1.GetBytes("POST https://a.test/up HTTP/1.1\r\nHost: a.test\r\n\r\n").Concat(body).ToArray();
-		ReadBytes(zip, "raw/001_c.txt").ShouldBe(expected);
+		ReadBytes(zip, "raw/1_c.txt").ShouldBe(expected);
 	}
 
 	[Fact]
@@ -570,17 +570,17 @@ public class SazExporter_Tests {
 		SazExporter.Export(capture.RunDirectory, saz);
 
 		// Then: the first session has the client port, TLS version, transfer length (with a thousands separator) and the reused server pipe;
-		// a request that opened its own connection has no x-serversocket; a CONNECT reports a body length of 0
+		// a request that opened its own connection has no x-serversocket and a plain one reports "None" as its TLS version; a CONNECT reports a body length of 0
 		using var zip = Open(saz);
 		Dictionary<string, string> Flags(string name) => ReadXml(zip, name).Element("SessionFlags")!.Elements("SessionFlag").ToDictionary(x => x.Attribute("N")!.Value, x => x.Attribute("V")!.Value);
-		var first = Flags("raw/001_m.xml");
+		var first = Flags("raw/1_m.xml");
 		first["x-clientport"].ShouldBe("51234");
 		first["https-client-version"].ShouldBe("Tls13");
 		first["x-responsebodytransferlength"].ShouldBe("12,345");
 		first["x-serversocket"].ShouldBe("REUSE ServerPipe#7");
-		Flags("raw/002_m.xml").ContainsKey("x-serversocket").ShouldBeFalse();
-		Flags("raw/002_m.xml").ContainsKey("https-client-version").ShouldBeFalse();
-		Flags("raw/003_m.xml")["x-responsebodytransferlength"].ShouldBe("0");
+		Flags("raw/2_m.xml").ContainsKey("x-serversocket").ShouldBeFalse();
+		Flags("raw/2_m.xml")["https-client-version"].ShouldBe("None");
+		Flags("raw/3_m.xml")["x-responsebodytransferlength"].ShouldBe("0");
 	}
 
 	[Fact]
@@ -604,8 +604,8 @@ public class SazExporter_Tests {
 		// Then: both sessions have the same client port and a 15-byte transfer length, and only the second names a reused server pipe
 		using var zip = Open(saz);
 		Dictionary<string, string> Flags(string name) => ReadXml(zip, name).Element("SessionFlags")!.Elements("SessionFlag").ToDictionary(x => x.Attribute("N")!.Value, x => x.Attribute("V")!.Value);
-		var first = Flags("raw/001_m.xml");
-		var second = Flags("raw/002_m.xml");
+		var first = Flags("raw/1_m.xml");
+		var second = Flags("raw/2_m.xml");
 		int.Parse(first["x-clientport"]).ShouldBeGreaterThan(0);
 		second["x-clientport"].ShouldBe(first["x-clientport"]);
 		first["x-responsebodytransferlength"].ShouldBe("15");
@@ -635,7 +635,7 @@ public class SazExporter_Tests {
 		// Then: the archive's request ends its headers (Fiddler rejects the session otherwise): a cut-off request gets its blank line,
 		// and anything that is not HTTP is a POST carrying the bytes as its body
 		using var zip = Open(saz);
-		Encoding.Latin1.GetString(ReadBytes(zip, "raw/001_c.txt")).ShouldBe(expected);
+		Encoding.Latin1.GetString(ReadBytes(zip, "raw/1_c.txt")).ShouldBe(expected);
 	}
 
 	[Fact]
@@ -655,6 +655,77 @@ public class SazExporter_Tests {
 		meta.Element("Mode")!.Value.ShouldBe("rejected");
 		meta.Element("Method")!.Value.ShouldContain("chrome");
 		meta.Element("Method")!.Value.ShouldContain("�");
+	}
+
+	[Theory]
+	[InlineData(9, "raw/1_c.txt", "raw/9_c.txt")]
+	[InlineData(10, "raw/01_c.txt", "raw/10_c.txt")]
+	[InlineData(100, "raw/001_c.txt", "raw/100_c.txt")]
+	[InlineData(1000, "raw/0001_c.txt", "raw/1000_c.txt")]
+	public void Export_FileNames_ArePaddedToTheWidthOfTheHighestSessionNumber(int sessions, string firstName, string lastName) {
+
+		// Given: a capture run folder with the given number of sessions
+		using var folder = new TempFolder();
+		var capture = new FileSessionCapture(folder.Path);
+		for (int i = 0; i < sessions; i++) {
+			var exchange = capture.BeginExchange();
+			exchange.WriteRequestHead("GET", "/", "HTTP/1.1", Array.Empty<KeyValuePair<string, string>>());
+			exchange.Complete(new ExchangeRecord { Timestamp = Noon, Method = "GET", Url = "http://a.test/", Scheme = "http" });
+		}
+		string saz = Path.Combine(folder.Path, "out.saz");
+
+		// When: it is exported
+		SazExporter.Export(capture.RunDirectory, saz);
+
+		// Then: the numbers in the names have as many digits as the highest number (Fiddler writes 1_c.txt for 6 sessions, 001_c.txt for 375, 0001_c.txt for 1100)
+		using var zip = Open(saz);
+		zip.GetEntry(firstName).ShouldNotBeNull(firstName);
+		zip.GetEntry(lastName).ShouldNotBeNull(lastName);
+	}
+
+	[Fact]
+	public void Export_SessionWithNoResponseFile_GetsAnEmptyOne() {
+
+		// Given: a capture run folder whose exchange has no response file (the client gave up before an answer)
+		using var folder = new TempFolder();
+		var capture = new FileSessionCapture(folder.Path);
+		var exchange = capture.BeginExchange();
+		exchange.WriteRequestHead("GET", "/hang", "HTTP/1.1", Array.Empty<KeyValuePair<string, string>>());
+		exchange.Complete(new ExchangeRecord { Timestamp = Noon, Method = "GET", Url = "http://a.test/hang", Scheme = "http", Mode = "plain" });
+		File.Delete(Path.Combine(capture.RunDirectory, "1_s.txt"));
+		string saz = Path.Combine(folder.Path, "out.saz");
+
+		// When: it is exported
+		SazExporter.Export(capture.RunDirectory, saz);
+
+		// Then: the archive has an empty response file for the session, as Fiddler writes
+		using var zip = Open(saz);
+		ReadBytes(zip, "raw/1_s.txt").ShouldBeEmpty();
+	}
+
+	[Fact]
+	public void Export_PlainHttpAndWebSocket_HaveFiddlersFlags() {
+
+		// Given: a plain HTTP request that reused neither connection, and a WebSocket session
+		using var folder = new TempFolder();
+		var capture = new FileSessionCapture(folder.Path);
+		var plain = capture.BeginExchange();
+		plain.WriteRequestHead("GET", "/", "HTTP/1.1", Array.Empty<KeyValuePair<string, string>>());
+		plain.Complete(new ExchangeRecord { Timestamp = Noon, Method = "GET", Url = "http://a.test/", Scheme = "http", Mode = "plain" });
+		var socket = capture.BeginExchange();
+		socket.WriteRequestHead("GET", "/ws", "HTTP/1.1", Array.Empty<KeyValuePair<string, string>>());
+		socket.Complete(new ExchangeRecord { Timestamp = Noon, Method = "GET", Url = "http://a.test/ws", Scheme = "http", Mode = "websocket-closed" });
+		string saz = Path.Combine(folder.Path, "out.saz");
+
+		// When: it is exported
+		SazExporter.Export(capture.RunDirectory, saz);
+
+		// Then: the plain request has BitFlags 0 and "None" as its TLS version (a request that did not arrive over TLS), and the WebSocket has IsWebSocketTunnel (0x40000)
+		using var zip = Open(saz);
+		var first = ReadXml(zip, "raw/1_m.xml");
+		first.Attribute("BitFlags")!.Value.ShouldBe("0");
+		first.Element("SessionFlags")!.Elements("SessionFlag").Single(f => f.Attribute("N")!.Value == "https-client-version").Attribute("V")!.Value.ShouldBe("None");
+		ReadXml(zip, "raw/2_m.xml").Attribute("BitFlags")!.Value.ShouldBe("40000");
 	}
 
 	[Fact]
@@ -689,7 +760,7 @@ public class SazExporter_Tests {
 
 		// Then: PipeInfo says both were reused, and BitFlags has ClientPipeReused (0x8) and ServerPipeReused (0x10)
 		using var zip = Open(saz);
-		var session = ReadXml(zip, "raw/001_m.xml");
+		var session = ReadXml(zip, "raw/1_m.xml");
 		session.Element("PipeInfo")!.Attribute("CltReuse")!.Value.ShouldBe("true");
 		session.Element("PipeInfo")!.Attribute("Reused")!.Value.ShouldBe("true");
 		session.Attribute("BitFlags")!.Value.ShouldBe("18");
@@ -715,8 +786,8 @@ public class SazExporter_Tests {
 
 		// Then: the first session started fresh connections, and the second reused both
 		using var zip = Open(saz);
-		ReadXml(zip, "raw/001_m.xml").Element("PipeInfo")!.Attributes().ShouldBeEmpty();
-		var second = ReadXml(zip, "raw/002_m.xml").Element("PipeInfo")!;
+		ReadXml(zip, "raw/1_m.xml").Element("PipeInfo")!.Attributes().ShouldBeEmpty();
+		var second = ReadXml(zip, "raw/2_m.xml").Element("PipeInfo")!;
 		second.Attribute("CltReuse")!.Value.ShouldBe("true");
 		second.Attribute("Reused")!.Value.ShouldBe("true");
 	}
@@ -741,9 +812,9 @@ public class SazExporter_Tests {
 		// Then: the archive holds that one session, with the request line and the origin's response (chunked, as it was sent) inside it
 		sessions.ShouldBe(1);
 		using var zip = Open(saz);
-		Encoding.Latin1.GetString(ReadBytes(zip, "raw/001_c.txt")).ShouldStartWith($"GET {origin.UrlFor("/page")} HTTP/1.1\r\n");
-		Encoding.Latin1.GetString(ReadBytes(zip, "raw/001_s.txt")).ShouldEndWith("\r\n\r\nf\r\nfrom the origin\r\n0\r\n\r\n");
-		ReadXml(zip, "raw/001_m.xml").Element("SessionFlags")!.Elements("SessionFlag")
+		Encoding.Latin1.GetString(ReadBytes(zip, "raw/1_c.txt")).ShouldStartWith($"GET {origin.UrlFor("/page")} HTTP/1.1\r\n");
+		Encoding.Latin1.GetString(ReadBytes(zip, "raw/1_s.txt")).ShouldEndWith("\r\n\r\nf\r\nfrom the origin\r\n0\r\n\r\n");
+		ReadXml(zip, "raw/1_m.xml").Element("SessionFlags")!.Elements("SessionFlag")
 			.Single(f => f.Attribute("N")!.Value == "x-mosaproxy-mode").Attribute("V")!.Value.ShouldBe("plain");
 	}
 }
