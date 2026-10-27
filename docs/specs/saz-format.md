@@ -20,7 +20,7 @@ A `.saz` is an ordinary zip file. Each captured HTTP exchange ("session") is sto
 
 Two further files sit at the archive root: `_index.htm` (a human-readable table for people who unzip the file) and `[Content_Types].xml`
 (an Open Packaging Conventions content-type map). A zip comment identifies the writer. Fiddler rebuilds its session list from `raw/`,
-so `_index.htm` is a convenience, not data **(inferred)**.
+so `_index.htm` is a convenience, not data (the loader does not need it, section 10.1).
 
 ## 2. The zip container
 
@@ -38,11 +38,11 @@ so `_index.htm` is a convenience, not data **(inferred)**.
 ## 3. Numbering and names
 
 - Files are named `NNN_c.txt`, `NNN_s.txt`, `NNN_m.xml` with the session number **zero-padded to 3 digits** (`001`, `002`, ...).
-  What happens past 999 sessions (4 digits, or a wider pad chosen from the total) is **(unknown)**. Readers in the wild match
-  `raw/(\d+)_(s|c|m|w)`, so they accept any width **(inferred)**.
+  What Fiddler writes past 999 sessions (4 digits, or a wider pad chosen from the total) is **(unknown)**. Its loader accepts any width:
+  unpadded and 4-digit numbers load (section 10.1).
 - The number is the session ID (`SID` in the XML). A saved subset of a longer capture may have gaps in the numbering **(inferred)**; the
   `SID` in the XML is the authoritative number.
-- The three files of a session share one number. A session with no response still has an `_s.txt` (may be empty) **(inferred)**.
+- The three files of a session share one number. What Fiddler writes for a session with no response (an empty `_s.txt`, or no file) is **(unknown)**; the loader accepts both (section 10.1).
 
 ## 4. `NNN_c.txt` - the request
 
@@ -282,13 +282,21 @@ Flags Fiddler writes:
 | `x-builder-maxredir` | Requests Fiddler made itself | `3`. |
 | `x-overridesslprotocols` | Requests Fiddler made itself | `tls1.0;tls1.1;tls1.2`. |
 
-Flags that Fiddler writes in other situations **(inferred)**: `ui-comments`, `ui-color`, `ui-backcolor`, `ui-bold`, `x-breakrequest`,
-`x-breakresponse`, `x-replaceonrequest`, `x-fromcache`, `x-Auto-Authed`, `x-clientcert`, `x-original-url`, `x-ssl-error`. User comments
-(the "Comments" column) travel as `ui-comments`.
+Flags that control how a session is shown. Fiddler reads these from the metadata when it loads an archive and applies them:
+
+| Name | Value | Effect |
+|---|---|---|
+| `ui-color` | A colour name (`red`) | Text colour of the session's row. |
+| `ui-backcolor` | A colour name (`LightYellow`) | Background colour of the row. |
+| `ui-bold` | `true` | Row shown in bold. |
+| `ui-comments` | Free text | The session's text in the Comments column. |
+
+Other flags that Fiddler writes in other situations **(inferred)**: `x-breakrequest`, `x-breakresponse`, `x-replaceonrequest`,
+`x-fromcache`, `x-Auto-Authed`, `x-clientcert`, `x-original-url`, `x-ssl-error`.
 
 ## 7. `_index.htm` - the human-readable table
 
-UTF-8 **with a BOM**, a single line, no doctype. It exists for people who unzip the archive; Fiddler does not need it **(inferred)**.
+UTF-8 **with a BOM**, a single line, no doctype. It exists for people who unzip the archive; Fiddler does not need it (section 10.1).
 Structure:
 
 ```html
@@ -348,12 +356,35 @@ The header block of `_c.txt` / `_s.txt` should be treated as Latin-1 / bytes, no
    as the certificate report; there is no HTTP body.
 6. Decode bodies per the `Content-Encoding` / `Transfer-Encoding` headers.
 
+### 10.1 What Fiddler's loader requires
+
+Checked by loading archives that each differed from a working one in a single way. Fiddler loaded every one of them with all sessions:
+
+| Change | Result |
+|---|---|
+| No `_index.htm` | Loads. |
+| No zip comment | Loads. |
+| No `[Content_Types].xml` | Loads. |
+| No `raw/` folder entry | Loads. |
+| `[Content_Types].xml` and `_index.htm` stored first | Loads. |
+| Sessions stored in reverse order | Loads. |
+| Only the `raw/NNN_*` files (none of the above) | Loads. |
+| A session with no `_s.txt` | Loads. |
+| A session with an empty `_s.txt` | Loads. |
+| Unpadded numbers (`raw/1_c.txt`) | Loads. |
+| Numbers of four digits (`raw/1000_c.txt`) | Loads. |
+
+So the per-session files under `raw/` are all that the loader needs: the index, the content-types file, the comment, the folder entry and the
+entry order are conventions of Fiddler's writer, and the width of the number is not significant. A request that is not parseable HTTP
+is the one thing found so far that a session cannot load with (section 4). Not tried: a session with no `_c.txt` or no `_m.xml`.
+
 ## 11. Open questions
 
-1. Width of the zero padding past 999 sessions.
+The loader's tolerance of the container (what it requires and ignores) is settled in section 10.1. What remains is what Fiddler itself writes.
+
+1. Width of the zero padding that Fiddler writes past 999 sessions. (The loader accepts any width.)
 2. The `0x2` bit Fiddler sets on decrypted requests, and the `0x10` on a non-reused direct HTTPS request (section 6.2).
-3. Whether Fiddler's loader requires `_index.htm`, the zip comment, or entry order.
-4. The exact form of `_w.txt` (WebSocket messages) and of `ui-*` flags; neither is documented.
-5. Password-protected archives: the encryption method and how the password is requested.
-6. Whether a session with no response writes an empty `_s.txt` or omits it.
-7. The `BitFlags` value of a plain HTTP session, and the `x-serversocket` form for a request on a new origin connection.
+3. The exact form of `_w.txt` (WebSocket messages), and any `ui-*` flags beyond `ui-color`, `ui-backcolor` and `ui-bold`; neither is documented.
+4. Password-protected archives: the encryption method and how the password is requested.
+5. Whether Fiddler writes an empty `_s.txt` or omits the file for a session with no response. (The loader accepts both.)
+6. The `BitFlags` value of a plain HTTP session, and the `x-serversocket` form for a request on a new origin connection.
