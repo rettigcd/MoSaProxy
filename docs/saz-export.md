@@ -12,9 +12,14 @@ The comparison was made against one Fiddler-written file (Fiddler 6.0.20262.1002
   writer); `_m.xml` in Fiddler's form (BOM, CRLF, `Session` / `SessionTimers` / `PipeInfo` / `TunnelInfo` / `SessionFlags`, real timers and
   `BitFlags` where the proxy can observe them); `_index.htm` with Fiddler's twelve columns; `[Content_Types].xml` byte for byte; and the
   absolute request line for requests inside a tunnel.
-- **Not verified:** no archive MoSaProxy has written has been opened in Fiddler. Everything above is matched to the reference file's
-  bytes and structure, not to Fiddler's behaviour on loading. Opening one is the test that settles whether any remaining difference matters.
-  It would also answer open question 3 of the spec: whether Fiddler's loader requires `_index.htm`, the zip comment, or a particular entry order.
+- **Verified:** Fiddler opens an archive MoSaProxy wrote (a run of about 1,500 sessions). The first attempt reported
+  `Request corrupt, unable to find end of headers` for a session whose request was not HTTP and left that session out, loading the
+  others (see the next bullet); once that was fixed the session loaded too. This confirms the layout above is acceptable to Fiddler. It does not say which individual details Fiddler requires:
+  open question 3 of the spec (whether the loader needs `_index.htm`, the zip comment, or a particular entry order) is still open, because
+  the exporter matches all of them.
+- **Requests that are not HTTP:** Fiddler rejects a session whose request lacks an end of headers (it reports the session and loads
+  the rest). A request with no blank line is made loadable on export, so the session appears: one cut off part way through its headers gets the blank line, and anything else (bytes of another
+  protocol sent through a tunnel, or nothing) becomes a `POST /` to `not-http.invalid` with a note header and the bytes as its body.
 - **Data the export relies on** is recorded at capture time: when each stage of an exchange happened (`ExchangeTimes`), whether the client
   and origin connections were reused, the origin connection's number, the client's port and the TLS version negotiated with the client.
 

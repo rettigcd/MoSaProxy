@@ -613,6 +613,50 @@ public class SazExporter_Tests {
 		second["x-serversocket"].ShouldStartWith("REUSE ServerPipe#");
 	}
 
+	[Theory]
+	[InlineData("", "POST / HTTP/1.1\r\nHost: not-http.invalid\r\nContent-Length: 0\r\nX-MoSaProxy-Note: the client sent bytes that are not an HTTP request; they follow as the body\r\n\r\n")]
+	[InlineData(")\u0002\u0097\u0001binary", "POST / HTTP/1.1\r\nHost: not-http.invalid\r\nContent-Length: 10\r\nX-MoSaProxy-Note: the client sent bytes that are not an HTTP request; they follow as the body\r\n\r\n)\u0002\u0097\u0001binary")]
+	[InlineData("GET /x HTTP/1.1\r\nHost: a.test\r\n", "GET /x HTTP/1.1\r\nHost: a.test\r\n\r\n")]
+	[InlineData("GET /x HTTP/1.1\r\nHost: a.te", "GET /x HTTP/1.1\r\nHost: a.te\r\n\r\n")]
+	public void Export_RequestWithNoEndOfHeaders_IsMadeLoadable(string captured, string expected) {
+
+		// Given: a captured request that has no blank line after its headers (empty, not HTTP at all, or cut off part way)
+		using var folder = new TempFolder();
+		var capture = new FileSessionCapture(folder.Path);
+		var exchange = capture.BeginExchange();
+		exchange.WriteRequestHead("GET", "/", "HTTP/1.1", Array.Empty<KeyValuePair<string, string>>());
+		exchange.Complete(new ExchangeRecord { Timestamp = Noon, Mode = "rejected" });
+		File.WriteAllBytes(Path.Combine(capture.RunDirectory, "1_c.txt"), Encoding.Latin1.GetBytes(captured));
+		string saz = Path.Combine(folder.Path, "out.saz");
+
+		// When: it is exported
+		SazExporter.Export(capture.RunDirectory, saz);
+
+		// Then: the archive's request ends its headers (Fiddler rejects the session otherwise): a cut-off request gets its blank line,
+		// and anything that is not HTTP is a POST carrying the bytes as its body
+		using var zip = Open(saz);
+		Encoding.Latin1.GetString(ReadBytes(zip, "raw/001_c.txt")).ShouldBe(expected);
+	}
+
+	[Fact]
+	public void Export_ExchangeWithControlCharactersInItsText_StillWritesItsMetadata() {
+
+		// Given: an exchange recorded with a "method" made of binary bytes (the XML metadata file cannot hold control characters)
+		using var folder = new TempFolder();
+		var capture = new FileSessionCapture(folder.Path);
+		var exchange = capture.BeginExchange();
+		exchange.WriteRequestHead("GET", "/", "HTTP/1.1", Array.Empty<KeyValuePair<string, string>>());
+		exchange.Complete(new ExchangeRecord { Timestamp = Noon, Method = ")\u0002\u0097\u0001\u0014chrome", Mode = "rejected" });
+
+		// When: its metadata is read back
+		var meta = System.Xml.Linq.XDocument.Load(Path.Combine(capture.RunDirectory, "1_m.xml")).Root!;
+
+		// Then: the file exists and holds the method with the unwritable characters replaced
+		meta.Element("Mode")!.Value.ShouldBe("rejected");
+		meta.Element("Method")!.Value.ShouldContain("chrome");
+		meta.Element("Method")!.Value.ShouldContain("�");
+	}
+
 	[Fact]
 	public void Export_Archive_CarriesAZipCommentNamingMoSaProxy() {
 

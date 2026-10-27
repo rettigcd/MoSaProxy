@@ -31,6 +31,8 @@ public sealed class WireTaps(ResourceLimitMonitor limits, IExchangeLog log, ISes
 		}
 	}
 
+	static bool LooksLikeRequestLine(string line) => System.Text.RegularExpressions.Regex.IsMatch(line, @"^[A-Za-z]+ \S+ HTTP/\d(\.\d)?$");
+
 	/// <summary>
 	/// A request Kestrel refused (malformed, too large...) or that the client abandoned part way never reaches the handler, so it would
 	/// leave no trace. When the connection ends with such bytes left over, record them as an exchange of their own.
@@ -38,7 +40,10 @@ public sealed class WireTaps(ResourceLimitMonitor limits, IExchangeLog log, ISes
 	void ReportUnansweredRequest(ConnectionContext connection, ConnectionWire wire) {
 		try {
 			if (wire.TakeUnansweredRequest() is not { } left) return;
-			string requestLine = Encoding.Latin1.GetString(left.Request).Split("\r\n")[0];
+			// Only a request line (METHOD target HTTP/x) is read for the method and URL. Anything else (a client speaking another
+			// protocol through a tunnel) is kept as bytes in the capture files, but not as text in the record.
+			string requestLine = Encoding.Latin1.GetString(left.Request, 0, Math.Min(left.Request.Length, 8192)).Split("\r\n")[0];
+			if (!LooksLikeRequestLine(requestLine)) requestLine = "";
 			var parts = requestLine.Split(' ');
 			string method = parts.Length > 0 ? parts[0] : "";
 			string target = parts.Length > 1 ? parts[1] : "";

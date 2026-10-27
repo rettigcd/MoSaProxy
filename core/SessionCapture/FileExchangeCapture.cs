@@ -166,14 +166,14 @@ sealed class FileExchangeCapture : IExchangeCapture {
 			var meta = new XElement("Exchange",
 				new XAttribute("Number", Number),
 				new XElement("Timestamp", record.Timestamp.ToString("O")),
-				new XElement("Client", record.Client),
-				new XElement("Method", record.Method),
-				new XElement("Url", record.Url),
-				new XElement("Scheme", record.Scheme),
-				new XElement("Host", record.Host),
+				new XElement("Client", Safe(record.Client)),
+				new XElement("Method", Safe(record.Method)),
+				new XElement("Url", Safe(record.Url)),
+				new XElement("Scheme", Safe(record.Scheme)),
+				new XElement("Host", Safe(record.Host)),
 				new XElement("Port", record.Port),
-				new XElement("ClientHttpVersion", record.ClientHttpVersion),
-				new XElement("OriginHttpVersion", record.OriginHttpVersion ?? ""),
+				new XElement("ClientHttpVersion", Safe(record.ClientHttpVersion)),
+				new XElement("OriginHttpVersion", Safe(record.OriginHttpVersion)),
 				new XElement("Status", record.Status?.ToString() ?? ""),
 				new XElement("RequestBytes", record.RequestBytes),
 				new XElement("ResponseBytes", record.ResponseBytes),
@@ -182,13 +182,13 @@ sealed class FileExchangeCapture : IExchangeCapture {
 				new XElement("RequestBodyTruncated", requestBodyMissing || ((_wireRequest is null ? _requestTee?.Truncated : requestTruncated) ?? false)),
 				new XElement("ResponseBodyTruncated", responseBodyMissing || ((_wireResponse is null ? _responseTee?.Truncated : responseTruncated) ?? false)),
 				new XElement("DurationMs", Math.Round(record.DurationMs, 1)),
-				new XElement("Mode", record.Mode),
-				new XElement("Error", record.Error ?? ""),
+				new XElement("Mode", Safe(record.Mode)),
+				new XElement("Error", Safe(record.Error)),
 				new XElement("ClientConnectionReused", record.ClientConnectionReused),
 				new XElement("OriginConnectionReused", record.OriginConnectionReused),
 				new XElement("OriginConnectionId", record.OriginConnectionId?.ToString() ?? ""),
 				new XElement("ClientPort", record.ClientPort),
-				new XElement("ClientTlsVersion", record.ClientTlsVersion ?? ""));
+				new XElement("ClientTlsVersion", Safe(record.ClientTlsVersion)));
 			if (record.Times is { } times) {
 				var element = new XElement("Times");
 				void Stamp(string name, DateTimeOffset? value) { if (value is { } at) element.Add(new XAttribute(name, at.ToString("O"))); }
@@ -213,6 +213,25 @@ sealed class FileExchangeCapture : IExchangeCapture {
 			Console.Error.WriteLine($"Capture metadata failed for exchange {Number}: {ex.Message}");
 			_limits?.Report($"saving capture metadata for exchange {Number}", ex);
 		}
+	}
+
+	/// <summary>
+	/// Text for the metadata file. Some of it comes from bytes a client sent that were not HTTP (a request line made of binary data, for
+	/// example), and XML cannot hold control characters: writing one throws part way through and leaves the file unfinished.
+	/// </summary>
+	static string Safe(string? text) {
+		if (string.IsNullOrEmpty(text)) return "";
+		var clean = new System.Text.StringBuilder(text.Length);
+		for (int i = 0; i < text.Length; i++) {
+			char c = text[i];
+			bool valid = char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1])
+				? true
+				: !char.IsSurrogate(c) && System.Xml.XmlConvert.IsXmlChar(c);
+			if (!valid) { clean.Append('�'); continue; }
+			clean.Append(c);
+			if (char.IsHighSurrogate(c)) clean.Append(text[++i]);
+		}
+		return clean.ToString();
 	}
 
 	void Fail(ref FileStream? file, Exception ex) {

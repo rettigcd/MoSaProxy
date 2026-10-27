@@ -107,6 +107,42 @@ public class UnusualRequests_Tests {
 	}
 
 	[Fact]
+	public async Task PlainHttp_ClientSendsBytesThatAreNotHttp_AreRecordedWithMetadataAndExportAsALoadableRequest() {
+
+		// Given: a capturing proxy and a client that sends binary data (another protocol, as some browsers do through a tunnel)
+		using var folder = new TempFolder();
+		await using var proxy = await TestProxy.StartAsync(Capturing(folder));
+		var binary = new byte[] { 0x29, 0x02, 0x97, 0x01, 0x0A, 0x14, (byte)'c', (byte)'h', (byte)'r', (byte)'o', (byte)'m', (byte)'e', 0x12, 0x0F, 0x00, 0x1A, 0x13 };
+
+		// When: the client sends it, reads the answer, and closes the connection
+		using (var tcp = new TcpClient()) {
+			await tcp.ConnectAsync(IPAddress.Loopback, proxy.Port);
+			var stream = tcp.GetStream();
+			await stream.WriteAsync(binary);
+			var reply = new byte[2048];
+			await stream.ReadAsync(reply);
+		}
+
+		// Then: it is recorded as a rejected exchange whose metadata file was written (the binary bytes did not become the method)
+		var record = (await proxy.Log.WaitForAsync()).Single();
+		record.Mode.ShouldBe("rejected");
+		var meta = await MetadataAsync(proxy, 1);
+		meta.Element("Mode")!.Value.ShouldBe("rejected");
+		meta.Element("Method")!.Value.ShouldBe("");
+
+		// and the exported request has an end of headers, so Fiddler can load it, and still holds the bytes the client sent
+		string saz = Path.Combine(folder.Path, "binary.saz");
+		SazExporter.Export(proxy.CaptureRunDirectory!, saz);
+		using var zip = System.IO.Compression.ZipFile.OpenRead(saz);
+		using var entry = zip.GetEntry("raw/001_c.txt")!.Open();
+		using var copy = new MemoryStream();
+		entry.CopyTo(copy);
+		var exported = copy.ToArray();
+		Encoding.Latin1.GetString(exported).ShouldContain("\r\n\r\n");
+		exported.AsSpan(exported.Length - binary.Length).SequenceEqual(binary).ShouldBeTrue();
+	}
+
+	[Fact]
 	public async Task PlainHttp_StrayLineBreakAfterARequest_IsNotAnExchange() {
 
 		// Given: a raw origin and a capturing proxy

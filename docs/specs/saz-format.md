@@ -64,6 +64,11 @@ Host: example.com\r\n
     path. Fiddler rewrites the request line to the absolute form for decrypted HTTPS. So the scheme and the full URL are recoverable
     from the first line alone.
   - CONNECT tunnel sessions: authority form (`CONNECT example.com:443 HTTP/1.1`).
+- **Every request file must be a parseable HTTP request: a request line (`METHOD target HTTP/x`) and an end of headers (a blank line).**
+  Fiddler checks this for each session when it loads an archive. A request without them makes it reject that session, with
+  `Invalid data was present for session [raw/N]` and `Request corrupt, unable to find end of headers`; the other sessions still load.
+  A file that holds anything else (the bytes of another protocol, a request cut off before its blank line, or nothing) must be turned
+  into a valid request before it is written if the session is to appear.
 - The body follows the blank line as received on the wire.
 - Request bodies are stored as sent, so compressed or chunked bodies stay compressed or chunked **(inferred; consistent with the
   Fiddler UI offering "decode" as a view, not a storage change)**.
@@ -336,7 +341,7 @@ The header block of `_c.txt` / `_s.txt` should be treated as Latin-1 / bytes, no
 ## 10. Reading a `.saz` (minimum viable reader)
 
 1. Open as zip. Enumerate entries matching `^raw/(\d+)_(c|s|m|w)\.(txt|xml)$`; group by the number.
-2. For each number read `_c.txt` as bytes, split at the first `\r\n\r\n` into head and body.
+2. For each number read `_c.txt` as bytes, split at the first `\r\n\r\n` into head and body. (Fiddler treats a request with no `\r\n\r\n` as an error, see section 4.)
 3. Do the same for `_s.txt`.
 4. Parse `_m.xml` (skip the BOM). Take timers from `SessionTimers`, everything else from `SessionFlags`.
 5. If the request method is `CONNECT`, treat the remainder after the blank line as the ClientHello report and the remainder of the response

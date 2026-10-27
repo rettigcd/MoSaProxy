@@ -119,7 +119,9 @@ public static class SazExporter {
 	static string ReadRequestLine(string requestFile) {
 		try {
 			using var reader = new StreamReader(requestFile, Encoding.Latin1);
-			return reader.ReadLine() ?? "";
+			// (a request made of anything but HTTP has no line worth showing, and could hold control characters)
+			string line = reader.ReadLine() ?? "";
+			return line.Length < 8192 && RequestLineText.IsMatch(line) ? line : "";
 		}
 		catch (IOException) { return ""; }
 	}
@@ -232,7 +234,7 @@ public static class SazExporter {
 			var e = row.Exchange;
 			bool tunnel = e.Method == "CONNECT";
 			string url = string.IsNullOrEmpty(e.Url) ? row.RequestLine : e.Url;
-			string host = e.Host, path = url;
+			string host = e.Host, path = url.Length == 0 ? "(not an HTTP request)" : url;
 			if (tunnel) host = "Tunnel to";
 			else if (url.IndexOf("://", StringComparison.Ordinal) is var scheme and > 0) {
 				// split by hand: Uri would percent-escape the path, and Fiddler shows it as it was sent
@@ -287,8 +289,18 @@ public static class SazExporter {
 		string source = Path.Combine(runDirectory, $"{e.Number}_c.txt");
 		if (!File.Exists(source)) return;
 		using var input = File.OpenRead(source);
-		var start = new byte[8192];
+		var start = new byte[65536];
 		int read = input.ReadAtLeast(start, start.Length, throwOnEndOfStream: false);
+
+		// Fiddler rejects a session whose request has no end of headers (it reports an error and leaves the session out). A request that is
+		// short enough to have been read whole and has none (the client sent something that is not HTTP, or stopped part way through its
+		// headers) is made loadable, so that the session appears.
+		if (read < start.Length && start.AsSpan(0, read).IndexOf("\r\n\r\n"u8) < 0) {
+			using var repaired = zip.CreateEntry(ArchivePath(e.Number, "c.txt"), CompressionLevel.Optimal).Open();
+			repaired.Write(LoadableRequest(start.AsSpan(0, read)));
+			return;
+		}
+
 		int eol = start.AsSpan(0, read).IndexOf("\r\n"u8);
 		string? line = eol > 0 ? AbsoluteRequestLine(Encoding.Latin1.GetString(start, 0, eol), e) : null;
 
@@ -299,6 +311,27 @@ public static class SazExporter {
 			output.Write(start, eol, read - eol);
 		}
 		input.CopyTo(output);
+	}
+
+	static readonly Regex RequestLineText = new(@"^[A-Za-z]+ \S+ HTTP/\d(\.\d)?$", RegexOptions.Compiled);
+
+	/// <summary>
+	/// A request that has no end of headers, in a form Fiddler can load. If it starts like an HTTP request (the client stopped part way
+	/// through its headers) the missing blank line is added. Otherwise it is not HTTP at all (empty, or another protocol's bytes sent through
+	/// a tunnel), so it is shown as a POST with a note, and the bytes the client sent as the body.
+	/// </summary>
+	static byte[] LoadableRequest(ReadOnlySpan<byte> request) {
+		int eol = request.IndexOf("\r\n"u8);
+		string firstLine = Encoding.Latin1.GetString(eol < 0 ? request : request[..eol]);
+		if (RequestLineText.IsMatch(firstLine)) {
+			var terminator = request.EndsWith("\r\n"u8) ? "\r\n"u8 : "\r\n\r\n"u8;
+			return [.. request, .. terminator];
+		}
+		var head = Encoding.Latin1.GetBytes(
+			"POST / HTTP/1.1\r\nHost: not-http.invalid\r\n" +
+			$"Content-Length: {request.Length}\r\n" +
+			"X-MoSaProxy-Note: the client sent bytes that are not an HTTP request; they follow as the body\r\n\r\n");
+		return [.. head, .. request];
 	}
 
 	/// <summary>The request line with an absolute URL, or null when it needs no change (it already has one, or it is not a request for a path).</summary>
