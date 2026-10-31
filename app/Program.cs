@@ -25,11 +25,6 @@ if (options.UntrustCa) {
 	}
 }
 
-if (options.ExportSazFolder is not null) {
-	string output = options.ExportSazOutput ?? SazExporter.DefaultOutputPath(options.ExportSazFolder);
-	return TryExportSaz(options.ExportSazFolder, output) ? 0 : 1;
-}
-
 var console = ColorConsole.Default;
 var sinks = new List<IExchangeLog> { new ConsoleExchangeLog() };
 if (options.LogPath is not null) sinks.Add(new JsonLinesExchangeLog(options.LogPath, options.LogMaxBytes, options.LogKeep));
@@ -49,7 +44,8 @@ var proxy = await ProxyHost.StartAsync(options, log, limits: limits);
 StopResult result;
 try {
 	console.WriteLine($"HTTP proxy listening on 127.0.0.1:{proxy.Port}. Press Ctrl+C to stop.");
-	if (proxy.CaptureRunDirectory is not null) console.WriteLine($"Capturing sessions to {proxy.CaptureRunDirectory}");
+	if (options.SazPath is null) console.WriteLine("Sessions are captured to a temporary folder that is deleted when the program exits. Use --saz FILE to keep them.");
+	else console.WriteLine($"Sessions are captured to a temporary folder that is deleted when the program exits; they will be saved to {Path.GetFullPath(options.SazPath)}.");
 	bool rootTrusted = false;
 	if (proxy.Authority is { } authority) {
 		bool interactive = OperatingSystem.IsWindows() && !Console.IsInputRedirected;
@@ -78,20 +74,23 @@ try {
 		console.WriteLine($"{Fg.Yellow}Stopping.{Fg.Restore} No new connections are accepted. Waiting up to {options.DrainTimeout.TotalSeconds:0.#} s for " +
 			$"{activity.Exchanges} request(s), {activity.Tunnels} tunnel(s) and {activity.WebSockets} WebSocket(s) to finish (Ctrl+C again to stop now).");
 	});
+
+	// A limit hit at any time during the run is reported, including one hit while the proxy was draining after a stop request.
+	var report = result.Report;
+	if (result.Limit is not null) console.WriteLine($"{Fg.Red}Stopped because a limit was reached:{Fg.Restore} {result.Limit}.");
+	else if (report.Drained) console.WriteLine($"{Fg.Green}Stopped.{Fg.Restore} Everything that was in progress finished.");
+	else console.WriteLine($"{Fg.Yellow}Stopped.{Fg.Restore} The wait ended with work still running; aborted {report.Exchanges} request(s), {report.Tunnels} tunnel(s) and {report.WebSockets} WebSocket(s).");
+
+	// Only now are all the exchanges' files complete, so the archive can be packed. It has to be written before the host is disposed,
+	// because disposing deletes the capture folder.
+	if (options.SazPath is not null && proxy.CaptureRunDirectory is { } runDirectory)
+		TryExportSaz(runDirectory, options.SazPath);
 }
 finally {
 	await proxy.DisposeAsync();
 }
-
-// A limit hit at any time during the run is reported, including one hit while the proxy was draining after a stop request.
-var report = result.Report;
-if (result.Limit is not null) console.WriteLine($"{Fg.Red}Stopped because a limit was reached:{Fg.Restore} {result.Limit}.");
-else if (report.Drained) console.WriteLine($"{Fg.Green}Stopped.{Fg.Restore} Everything that was in progress finished.");
-else console.WriteLine($"{Fg.Yellow}Stopped.{Fg.Restore} The wait ended with work still running; aborted {report.Exchanges} request(s), {report.Tunnels} tunnel(s) and {report.WebSockets} WebSocket(s).");
-
-// Only now are all the exchanges' files complete, so the archive can be packed.
-if (options.SazOnShutdown && proxy.CaptureRunDirectory is { } runDirectory)
-	TryExportSaz(runDirectory, SazExporter.DefaultOutputPath(runDirectory));
+if (proxy.CaptureCleanupError is { } cleanupError)
+	console.WriteLine($"{Fg.Red}Could not delete the temporary capture folder:{Fg.Restore} {cleanupError}. It will be removed the next time MoSaProxy starts.");
 return result.Limit is not null ? 2 : 0;
 
 static bool TryExportSaz(string runDirectory, string outputPath) {

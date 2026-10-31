@@ -6,506 +6,162 @@ A forward proxy that logs traffic for both HTTP and HTTPS, and speaks both HTTP/
 Browsers and other clients are pointed at it with a normal proxy setting
 (e.g. Chrome `--proxy-server`).
 
-See also [landscape.md](landscape.md): the other proxy servers, the features they offer, and the save formats wanted.
-
-**Naming.** The project is **MoSaProxy** (it was called "mos" until it was renamed): the solution `MoSaProxy.slnx`, the program
-`app/MoSaProxy.csproj` (`MoSaProxy.exe`), the tests `test/MoSaProxy.Core.Tests`, the `MoSaProxy` namespace, and the `x-mosaproxy-*`
-flags in exported `.saz` files. Three identifiers that exist outside the code deliberately still say "mos", so that the root
-certificate that may already be installed as trusted on a machine keeps being recognized: the certificate's subject
-(`CN=mos Proxy Root CA (local test CA), O=mos`), its file names (`mos-root-ca.pfx` and `.cer`), and its default folder
-(`%LOCALAPPDATA%\mos\ca`). Renaming those needs a migration (see the note in `CertificateAuthority.cs`). The repository
-folder itself is still named `mos` on disk.
-
-## Where we are
-
-Phases 1 to 5 are done (see below), Phase 6 is built for HTTP/1.1 (exact bytes) and HTTP/2 (decoded from the frames), and 310 tests pass. MoSaProxy is a loopback-only forward proxy on Kestrel:
-
-- HTTP/1.1 and HTTP/2, on both sides of the proxy.
-- HTTPS as blind tunnels or with TLS interception (a local root CA, with an offer at startup to trust it).
-- WebSockets, including over HTTP/2.
-- A JSON Lines log (with rotation), per-exchange capture files, and `.saz` export.
-- Graceful shutdown, and a stop at once, with the limit named, when the system runs out of something.
-
-The code is a `core/` library (`MoSaProxy.Core`) plus the console program in `app/`; see
-[class-classification.md](class-classification.md). Tests are in two projects: `test/MoSaProxy.Core.Tests` and `test/MoSaProxy.App.Tests`.
-
-What is not done: opening an
-exported `.saz` in Fiddler to confirm it loads, HAR and mitmproxy flow export, and removing the console diagnostics from Core.
-
-## Key design decisions
-
-### 1. HTTPS: tunnel or intercept?
-
-A proxy handles HTTPS through `CONNECT host:443`. After that the traffic is encrypted end to end.
-
-| Mode | What we can log | Cost |
-|---|---|---|
-| **Blind tunnel** | Host, port, bytes transferred, timing | Simple. No certificates. |
-| **TLS interception (MITM)** | Full URL, headers, bodies, status codes | Needs a local CA that the client trusts. Certificate pinning breaks. |
-
-**Plan:** support both. Blind tunnel is the default and the fallback. Interception is enabled per host or
-globally, and only after the user installs the MoSaProxy root CA in a test browser profile or OS store. Interception is
-for the user's own traffic and test devices only.
-
-### 2. HTTP/2
-
-HTTP/2 only ever appears through TLS (ALPN `h2`) in practice, so it matters only in intercept mode.
-Two connections are involved, and each negotiates its own protocol:
-
-- **Client to proxy:** the proxy presents a generated certificate and offers ALPN `h2` and `http/1.1`.
-- **Proxy to origin:** the proxy negotiates with the real server, preferring `h2`.
-
-The two sides do not have to match. The proxy can serve h2 to the client and use HTTP/1.1 upstream, or the
-reverse. Because requests are translated to a protocol-neutral model in the middle, logging is the same in
-both cases.
-
-### 3. Do not hand-roll HTTP/2
-
-HTTP/2 framing, HPACK and flow control are a large amount of work to get right. Use the platform:
-
-- **Server side:** Kestrel (HTTP/1.1 + HTTP/2, ALPN, `SslStream`).
-- **Client side:** `HttpClient` / `SocketsHttpHandler` with `HttpVersion.Version20` and
-  `HttpVersionPolicy.RequestVersionOrLower`.
-
-Open question for Phase 3: Kestrel does not natively understand `CONNECT` as a proxy command. The plan is
-to accept the connection ourselves, answer `CONNECT`, then hand the decrypted-by-us stream to Kestrel (or
-run `SslStream` ourselves and feed the resulting stream to an HTTP/2 server). A short spike decides this.
-Alternatives: YARP as the forwarding engine, or a loopback Kestrel listener behind our `TcpListener`.
-
-### 4. Logging
-
-Define one protocol-neutral record, independent of HTTP version:
-
-```
-Timestamp, ClientEndpoint, Scheme, Host, Port, Method, Path+Query, HttpVersion (client side / origin side),
-Status, RequestHeaders, ResponseHeaders, RequestBytes, ResponseBytes, DurationMs, Mode (plain/tunnel/intercept), Error
-```
-
-- Console output stays one concise line per exchange.
-- A structured sink (JSON Lines file) is added next.
-- Bodies are off by default, then optionally captured with a size cap, to avoid memory blow-ups and
-  accidental storage of secrets.
-- Nothing is redacted. The JSONL log records `Authorization`, `Cookie` and `Set-Cookie` values as they appear,
-  the same as session capture (decision 5). Treat log files as sensitive.
-
-### 5. Session capture and `.saz` output
-
-Eventual goal: save a `.saz` file like Fiddler does, so sessions can be opened in Fiddler and similar tools.
-A `.saz` is a zip archive. Each request/response exchange is stored as three files, numbered from 1:
-
-| File | Contents |
-|---|---|
-| `1_c.txt` | Raw bytes sent by the client (request line, headers, body) |
-| `1_s.txt` | Raw bytes sent by the server (status line, headers, body) |
-| `1_m.xml` | Metadata about the exchange (timings, client/server endpoints, flags, and so on) |
-
-(Fiddler puts these under a `raw/` folder inside the zip, alongside a `[Content_Types].xml`. Confirm the exact
-layout and the `_m.xml` schema against a real `.saz` file before implementing the final writer.)
-
-Two-step approach:
-
-1. **Intermediate step: capture folder (Phase 1b).** The same three files per exchange are written directly into a
-   sub-folder of the logging directory. Each run creates its own sub-folder, and files are numbered starting at 1
-   and incrementing with every exchange (`1_c.txt`, `1_s.txt`, `1_m.xml`, `2_c.txt`, ...). This is easy to inspect
-   and debug, and the file format is already the one the `.saz` needs.
-2. **Final step: `.saz` writer (Phase 5).** Zip the capture folder's contents into a `.saz`, either on shutdown,
-   on demand, or as a command that converts an existing run folder.
-
-Design points to settle during Phase 1b:
-
-- **Raw bytes versus reconstructed bytes.** The end goal is to capture exactly what is on the wire, not a
-  reconstruction. Kestrel parses requests before our handler sees them, so while we build on Kestrel the files
-  are a reconstruction: request/status line, headers, a blank line, then the body. Known differences from the
-  wire, seen in the first live capture: Kestrel reports request headers in its own order (not the order the client
-  sent them) with normalized casing; the origin's `Transfer-Encoding: chunked` header is kept but the body is stored
-  with the chunk framing already removed; and the request-side `Host`/`Proxy-Connection` headers appear as Kestrel
-  presents them.
-  For HTTP/2 the headers are rendered in HTTP/1.1 text form (Fiddler does the same). This is a deliberate
-  stop-gap: Phase 6 replaces or taps Kestrel to get byte-exact capture. Keep the capture code behind a small
-  interface (for example `ISessionCapture`) so that the source of the bytes can change without touching the
-  rest of the proxy.
-- **Bodies.** Capture needs the full request and response bodies, streamed to disk while they are forwarded (not
-  buffered in memory), with an optional size cap. Bodies are stored as received: still compressed if the origin
-  compressed them, and with chunked framing removed (the reconstructed headers say so). Binary data (images and so on)
-  is stored as-is, which is why these are files and not fields in the JSONL log.
-- **Tunnels.** A blind HTTPS tunnel (Phase 2) has no readable content, so it produces only the `CONNECT` line and
-  response in `_c.txt` / `_s.txt` plus a metadata file. Intercepted HTTPS (Phase 3) is stored decrypted.
-- **Off by default.** Enabled with an option (for example `--capture <dir>`), because it writes everything to disk.
-- **Not redacted.** Raw capture contains credentials, cookies and personal data, exactly like a Fiddler session.
-  The capture folder, the JSONL log and any `.saz` must be treated as sensitive: never commit them (add the folder to
-  `.gitignore`) and delete them when done.
-- **Numbering.** Exchange numbers are assigned in the order requests arrive, so the number is stable even when
-  responses finish out of order. Phase 1b writes inline through buffered file streams; a background queue is a
-  later optimization if capture is found to slow forwarding.
-- **Metadata.** `_m.xml` should carry at least the fields in the log record (timestamps, client endpoint,
-  protocol versions, status, byte counts, mode, error), written in Fiddler's schema where practical.
-
-### 6. Architecture goal: one Core, several UIs
-
-Core holds everything that is not tied to a user interface (proxying, interception, certificates, shutdown, limits,
-logs, capture files, trust store, and the save formats). Each front end references Core and does only the presenting,
-so nothing is written twice. Today there is one front end, the console program, in the same `app/` project.
-[class-classification.md](class-classification.md) maps every type to Core or UI and lists the work to separate them.
-
-Save formats, all to be produced by Core so that every front end gets them:
-
-| Format | State |
-|---|---|
-| `.saz` (Fiddler) | Done (`SazExporter`) |
-| mitmproxy flow file | Not started |
-| `.har` | Not started |
-
-Follow-up work, not yet started: a separate Core class library; replacing Core's direct console diagnostics with events;
-a Core service for the orchestration every front end would repeat; one exporter shape that `.saz`, mitmproxy flow and
-`.har` plug into.
+What is built is described in [capabilities.md](capabilities.md); this plan lists only what is left.
+See also [current-landscape/landscape.md](current-landscape/landscape.md): the other proxy servers, the features they offer, and the save formats wanted.
 
 ## Testing approach
 
-- **Long-term functionality is tested in the test project** (`test/MoSaProxy.Core.Tests`). When implementing any phase,
-  add tests there as part of the work and run them with `dotnet test` from the repo root. A phase is not done
+- **Long-term functionality is tested in the test project** (`test/MoSaProxy.Core.Tests`). When implementing any item,
+  add tests there as part of the work and run them with `dotnet test` from the repo root. An item is not done
   until its tests are in the test project and passing.
-- **Short-term spikes are exempt.** Throwaway experiments (e.g. the Phase 3 Kestrel-vs-`SslStream` spike)
-  can be checked by hand or with a scratch script and do not need tests in the test project. If a spike's
-  code is kept, add tests for it at that point.
+- **Short-term spikes are exempt.** Throwaway experiments can be checked by hand or with a scratch script and do not
+  need tests in the test project. If a spike's code is kept, add tests for it at that point.
 - Manual checks with a browser (e.g. Chrome with `--proxy-server`) are a complement to tests, not a
   replacement for them.
 - How to write tests (Given / When / Then comments, naming, Shouldly, etc.) is in
   [test/test_instructions.md](../test/test_instructions.md).
 
-## Phases
+## Remaining work
 
-### Phase 1: Solid HTTP/1.1 proxy *(done)*
+### Save formats
 
-- Replace the hand-rolled parser with Kestrel (or keep the parser only if there is a reason to).
-- Keep-alive support, chunked request and response bodies, streaming (no buffering of whole bodies).
-- Correct hop-by-hop header handling. Policy: no `Via` or `X-Forwarded-For` headers are added. `Expect: 100-continue` is handled.
-- Absolute-URI and origin-form handling, error responses (400/502/504), upstream timeouts.
-- Introduce the log record and a logging abstraction; console + JSONL sinks.
-- Configuration: port and log path, via CLI (`--port`, `--log`). The listener is always bound to loopback (`127.0.0.1`); there is no option to bind other interfaces.
-- Tests: an in-process fake origin server plus proxy tests for GET, POST, chunked, large bodies, redirects.
+Core should produce every save format so that every front end gets them. `.saz` is done; these are not started, and their
+timing is open:
 
-**Done when:** Chrome browses `http://` sites reliably through the proxy and every exchange is logged.
+- **mitmproxy flow file.**
+- **`.har`.**
+- One exporter shape that `.saz`, mitmproxy flow and `.har` plug into.
 
-### Phase 1b: Capture folder (Fiddler-style session files) *(done)*
+### `.saz` fidelity
 
-- Add a capture sink, enabled by `--capture <dir>`. Each run creates a new sub-folder under `<dir>`.
-- For every exchange, write `N_c.txt`, `N_s.txt` and `N_m.xml`, with `N` starting at 1 for each run and
-  incrementing per request in arrival order.
-- Stream request and response bodies to disk while forwarding (no full buffering), with an optional size cap.
-- Settle the design points listed in decision 5 (reconstructed versus raw bytes, body handling).
-- Tests: a request/response through the fake origin produces the three files with the expected request line,
-  headers, body bytes and metadata; numbering restarts at 1 in a new run folder; binary bodies are byte-identical;
-  capture failures never break forwarding.
+The remaining differences between `SazExporter` output and a file Fiddler wrote are tracked in [saz-export.md](saz-export.md)
+(CONNECT report text, Fiddler's own `_w.txt` frame format, `BitFlags` for a plain-HTTP tunnel, HTTP/2 reuse marks).
+None stops Fiddler from loading the file.
 
-**Done when:** browsing through the proxy with `--capture` produces a run folder whose files match what was sent
-and received.
+### Core cleanup
 
-### Phase 2: HTTPS blind tunnel *(done)*
+Core should hold everything that is not tied to a user interface, and each front end should only present. Not yet done:
 
-Outcome of the Kestrel check: Kestrel's `IHttpUpgradeFeature` refuses to upgrade a `CONNECT` request ("non-upgradable"),
-so tunnels are handled by a connection middleware (`TunnelHandler`) that runs in front of Kestrel's HTTP parser.
-It peeks at the first bytes of each connection, takes over those that begin with `CONNECT `, and hands everything
-else to Kestrel unchanged. This is also the hook point for the Phase 6 wire tap (option A).
-Kestrel's `ConnectionClosed` token fires as soon as the client half-closes, so tunnels are not tied to it; they end
-when the origin closes, on error, after an idle timeout (`TunnelIdleTimeout`, default 5 minutes), or at proxy shutdown.
-Connecting to the origin times out after `ConnectTimeout` (default 15 seconds, set with `--connect-timeout SECONDS`). TLS SNI is not logged (it would
-require parsing the ClientHello); that is left for Phase 3, where TLS is terminated anyway.
+- Replace Core's direct console diagnostics with events.
+- A Core service for the orchestration every front end would otherwise repeat.
+- Anything still marked Mix in [class-classification.md](class-classification.md) should be split into Core and UI parts.
 
-- Implement `CONNECT`: connect to the target, reply `200 Connection Established`, then relay bytes both ways.
-- Log host, port, bytes in/out, duration, and the TLS SNI if cheaply available.
-- Half-close handling, idle timeouts, cancellation, backpressure.
+### Temporary capture folder: follow-ups
 
-**Done when:** HTTPS sites load through the proxy and appear in the log as tunnels.
+The temporary capture folder is built (see [capabilities.md](capabilities.md)). What is left:
 
-### Phase 3: TLS interception with HTTP/1.1 *(done)*
+- Decide whether to offer a way to turn capture off for pure forwarding. Every body is written to disk on every run, and credentials
+  and cookies reach the temp folder even when no export is asked for. `--capture-max-body` limits the size, not the exposure.
+- Run the real program with a real console interrupt, to see the `--saz` archive written before the folder is deleted. The two
+  parts are tested separately, and a killed process was checked by hand (the next start deleted its folder), but the graceful path
+  through `Program.cs` has not been seen end to end.
 
-Implemented in `CertificateAuthority` (root and per-host certificates) and `TunnelHandler` (interception path).
-Enabled with `--intercept`; `--intercept-bypass a.com,*.b.com` keeps hosts as blind tunnels; `--ca-dir` chooses where
-the root is stored (default `%LOCALAPPDATA%\mos\ca`, outside the repository).
+### Browser UI
 
-- The Kestrel-vs-`SslStream` question is settled: after `CONNECT` the connection middleware answers 200, does the TLS
-  handshake itself with `SslStream` (ALPN offers only `http/1.1` for now), replaces the connection's transport with the
-  decrypted stream, and calls `next`, so Kestrel parses the decrypted HTTP/1.1 and `ProxyHandler` forwards it. The
-  CONNECT target host and port are carried in the connection's `Items`, and the upstream request goes to
-  `https://<connect host>:<port><path>`. The same hook makes HTTP/2 (Phase 4) a matter of offering `h2` in ALPN.
-- The CONNECT itself is logged and captured as its own exchange as soon as the 200 is sent; each decrypted request is
-  a separate exchange (so capture numbering is CONNECT = 1, first request = 2, and so on).
-- The origin's certificate is validated normally; an untrusted origin certificate gives the client a 502.
-- A client that does not trust the root is detected as a read failure on the decrypted stream right after the
-  handshake (TLS 1.3 lets the server finish its side first) and logged as a TLS failure with a hint.
-- Making Chrome trust the proxy: at startup with `--intercept`, MoSaProxy checks whether its root is in the current Windows
-  user's trusted root store (`RootTrust`, `InterceptionSetup`). If it is, it prints plain Chrome commands (real padlock).
-  If it is not, and the console is interactive, it asks `[y/N]` (default No, no "don't ask again") before installing the
-  public certificate; Windows then shows its own confirmation dialog. If a different MoSaProxy root (from an earlier CA
-  folder) is installed, it offers to replace it, adding the new root first so a refused dialog never leaves none.
-  If the user declines (or the console is not interactive), it prints commands for a throwaway Chrome profile started
-  with `--ignore-certificate-errors` (use that window only for browsing through the proxy; Chrome marks pages "Not
-  secure"). `--untrust-ca` removes every MoSaProxy root from the user's trusted roots and exits. The store sits behind
-  `IRootStore`, so tests use a fake and never touch the real store.
-- Lessons learned while getting Chrome to work (so they are not repeated):
-  - Chrome's `--ignore-certificate-errors-spki-list` only matches certificates the server actually sends in the
-    handshake, and a self-signed root is never sent, so passing the root's hash does nothing. (With the host
-    certificate's own hash it works, but that changes per host.) It is not used.
-  - Sending a root or intermediate on Windows means giving .NET's `SslStreamCertificateContext` extra
-    certificates, and it installs them into the user's `CurrentUser\CA` certificate store as a side effect. Stale
-    copies with the same subject name then break later chain building (`NotSignatureValid`). A two-level CA built
-    on this was tried and dropped. A test checks that the proxy leaves no certificates in the user's stores.
-  - The headless Chrome net-log (`--log-net-log=file --net-log-capture-mode=Everything`) shows the exact
-    certificate verification result and is the quickest way to diagnose a certificate error.
-- Not done yet: automatic fallback to a blind tunnel for hosts whose handshake fails (certificate pinning).
-  Use `--intercept-bypass` for those hosts for now.
+A browser front end over the same Core as the console program. The browser sends its ordinary traffic through the proxy
+(port 8080) and loads the UI directly from a second loopback port (for example 9090). Chrome skips the proxy for `localhost`,
+`127.0.0.1` and `[::1]` by default, so the UI's own requests are not logged as traffic; for any other host name, use
+`--proxy-bypass-list`. The proxy listener must never serve the UI, because it treats every request as one to forward.
 
-Original scope for reference:
+The API and the UI are separate pieces of work joined by one contract: the JSON shape of an exchange and the endpoints below.
+Build in this order:
 
-- Generate and persist a root CA (key stored with restrictive file permissions). Export the cert for
-  install into a test browser profile.
-- Mint per-host leaf certificates on demand (SAN = host), cache them, and respect SNI.
-- After `CONNECT`, terminate TLS with the leaf certificate, parse the decrypted HTTP/1.1, forward over a
-  new upstream TLS connection (validating the origin's real certificate), and log full exchanges.
-- Interception allow/deny list (e.g. never intercept banking sites; fall back to tunnel).
-- Resolve the Kestrel-vs-`SslStream` question from decision 3.
+1. **Core exposes exchanges and a live stream.** This is the "Core cleanup" work above, narrowed to what the API needs:
+   - An exchange store: a stable id per exchange (the capture number `N`), summaries for listing, the full record for one
+     exchange, and the request and response bytes. The store is the temporary capture folder (`CaptureRun`), so it is always
+     there and the UI always works.
+   - An event for "exchange started" and "exchange finished" (so the UI can show a request that is still running), replacing
+     direct console output.
+   - Tests in `test/MoSaProxy.Core.Tests` through the Core types only, with no web server.
+2. **A local API.** A second Kestrel listener (same process, so live data is direct) that exposes the store. The endpoints are
+   thin: each calls Core and returns JSON. Starting set:
 
-**Done when:** `https://` pages load in a profile that trusts the MoSaProxy CA, with full URLs and headers logged.
+   | Endpoint | Purpose |
+   |---|---|
+   | `GET /api/status` | Proxy port, interception on or off, HTTP/2 on or off, capture and log paths, counts, whether the root CA is trusted, version. |
+   | `GET /api/exchanges` | Page of summaries (id, time, method, scheme, host, path, status, protocol each side, mode, bytes, duration). Query: `after` (id, for paging and catching up), `limit`, `host`, `method`, `status`, `mode`, `q` (text in the URL). |
+   | `GET /api/exchanges/{id}` | The full record of one exchange: the log fields, headers each way, the capture source labels, timings, error. |
+   | `GET /api/exchanges/{id}/request` | The request exactly as captured (`N_c.txt`), as bytes. |
+   | `GET /api/exchanges/{id}/response` | The response exactly as captured (`N_s.txt`), as bytes. |
+   | `GET /api/exchanges/{id}/request/body`, `.../response/body` | Just the body. `?decode=true` undoes `Content-Encoding` and chunking so the UI can show text, images and JSON. |
+   | `GET /api/exchanges/{id}/websocket` | The messages of a WebSocket exchange (direction, time, type, size, text or hex). |
+   | `GET /api/stream` | Server-Sent Events: one event when an exchange starts, one when it finishes, and one per WebSocket message. Supports `Last-Event-ID` so a reconnecting page misses nothing. |
+   | `GET /api/export/saz` | Downloads a `.saz` of all exchanges, or of those named in `?ids=`. |
+   | `POST /api/stop` | Starts the graceful shutdown (the drain period), like the first Ctrl+C. |
 
-### Phase 4: HTTP/2 *(done)*
+   - **OpenAPI and endpoint documentation.** The API describes itself in OpenAPI, and the endpoint documentation is produced
+     from that description, not written by hand, so the two cannot drift apart.
+     - Use ASP.NET Core's built-in OpenAPI support (`Microsoft.AspNetCore.OpenApi`, available for `net10.0`) on minimal-API
+       endpoints. Give each endpoint a name, a summary, typed request and response models, and its error responses, so the
+       description is useful and not just a list of paths.
+     - The exchange summary and the full record are named types shared by the endpoints, the stream events and the UI, so they
+       appear once as OpenAPI schemas. Endpoints that return bytes (`/request`, `/response`, the bodies, the `.saz`) and the
+       `/api/stream` event stream do not infer well and need their content types and event shape declared by hand.
+     - The running app serves the description at `/openapi/v1.json` (behind the same safety checks as the rest of the API).
+     - The checked-in documentation is `docs/api/openapi.json`, generated at build time (the
+       `Microsoft.Extensions.ApiDescription.Server` build task) or by a small command. A readable reference, `docs/api/endpoints.md`
+       (endpoint, parameters, response, errors, an example), is generated from the same file. A test fails when the checked-in
+       `openapi.json` no longer matches what the code produces, so changing an endpoint means regenerating the documents.
+     - Optional later: serve an interactive page (Scalar or Swagger UI) from the same listener, and generate the UI's TypeScript
+       types from `openapi.json` if the UI moves to a framework.
+     - Tests: the description is valid OpenAPI, every mapped endpoint appears in it with a summary, and each response type
+       matches what the endpoint really returns (spot-checked through the real listener).
 
-Implemented as planned, with these specifics:
+   Left for later: changing settings while running (the options are fixed at start-up today), clearing the capture, replaying a
+   request, and the HAR and mitmproxy exports (add `/api/export/har` and `/api/export/flow` when those formats exist).
+   - **Safety.** The listener is loopback-only. The UI shows credentials and cookies, and a web page on another site could
+     try to call a local API, so every request must be checked: reject a wrong `Host` header (DNS rebinding), reject any
+     `Origin` other than the UI's own, and require a per-run token that the console prints in the UI's address.
+   - Tests: request each endpoint through the real listener with the fake origin, including paging, filters, the stream
+     (events arrive, and `Last-Event-ID` resumes) and each rejection above.
+3. **A minimal UI.** Static HTML and JavaScript served by the same listener, with no build step: a table of exchanges fed by
+   `/api/stream`, and a detail pane showing the request, response, headers and body of the selected row. During development it can
+   run against canned JSON files before the endpoints exist. Checked by hand in Chrome; add a test that the listener serves the
+   page and nothing outside the UI folder.
 
-- **Client side:** on an intercepted connection the TLS handshake offers `h2` then `http/1.1` (ALPN). Kestrel only picks
-  HTTP/2 for a connection that looks like TLS and reports `h2`, so after the handshake `TunnelHandler` sets
-  `ITlsConnectionFeature` and `ITlsApplicationProtocolFeature` on the connection. `--no-http2` offers only `http/1.1`.
-- **Origin side:** requests to `https://` origins ask for HTTP/2 with `RequestVersionOrLower`, so the origin's ALPN decides and
-  an origin without HTTP/2 transparently gets HTTP/1.1. Plain `http://` origins always get HTTP/1.1. The two sides are
-  independent, so any combination works (h2 client + h1 origin, h1 client + h2 origin).
-- **Bodies:** HTTP/2 has no chunking or required `Content-Length`, so whether a request has a body now comes from
-  Kestrel's `IHttpRequestBodyDetectionFeature` instead of the headers.
-- **Responses:** no reason phrase is set for HTTP/2 clients; trailers (as used by gRPC) are passed on.
-- **Logging and capture:** each request is its own exchange (multiplexed requests are logged separately). The record shows
-  the protocol on each side (`HTTP/2`, `HTTP/1.1`); the capture files use the HTTP/1.1 text layout with the version
-  in the request and status lines (`GET /page HTTP/2`, `HTTP/2 200 OK`), as the plan said Fiddler does.
-- **Verified with:** the test suite (flow control with a 5 MB body, 30 concurrent requests over one connection per side,
-  bodies without `Content-Length`, trailers, both fallbacks) and headless Chrome 154, where 25 of 26 decrypted requests
-  were HTTP/2 on both sides.
-- **Not done:** stream resets and `GOAWAY` are not mapped between the two sides explicitly (each side's own HTTP/2
-  stack handles its own connection), and WebSocket over HTTP/2 (extended CONNECT) is left for Phase 5.
+Once these work, grow both together (filters, search, export buttons, settings). Add the new types to
+[class-classification.md](class-classification.md) (the API as UI, the store as Core).
 
-Original scope for reference:
+### HTTPS interception
 
-- Offer ALPN `h2` and `http/1.1` to the client; serve HTTP/2 on the intercepted connection.
-- Upstream: prefer `h2` where the origin supports it, fall back to HTTP/1.1.
-- Map HTTP/2 pseudo-headers (`:method`, `:scheme`, `:authority`, `:path`) to the neutral record.
-- Handle stream multiplexing, header-size limits, trailers, and `GOAWAY` / reset propagation.
-- Log the negotiated protocol for each side.
+- Automatic fallback to a blind tunnel for hosts whose handshake fails (certificate pinning). For now, use `--intercept-bypass`.
+- Rename the root CA's subject, file names and folder from "mos" to MoSaProxy. This needs a migration so a root already trusted
+  on a machine keeps being recognized (see the note in `CertificateAuthority.cs`).
 
-**Done when:** Chrome negotiates h2 with the proxy, a site that supports h2 is fetched over h2 upstream, and each stream is logged as its own entry.
+### HTTP/2
 
-### Phase 5: Hardening and extras
+- Map stream resets and `GOAWAY` between the two sides explicitly (each side's own HTTP/2 stack handles its own connection today).
+- Capture: write trailers, and support `PUSH_PROMISE` (a push makes that direction give up and fall back to the `parsed` files).
+- Of several identical concurrent requests (same method, `:authority` and `:path`) the captured responses can be swapped between them.
 
-- **WebSockets *(done)*:** HTTP/1.1 upgrades and HTTP/2 extended `CONNECT` (RFC 8441) pass through (`WebSocketProxy`).
-  The proxy opens a `ClientWebSocket` to the origin first (so the origin's subprotocol choice is known), then accepts the
-  client's WebSocket and copies messages in both directions, passing the close code and reason on. The two legs are
-  independent (own ping/pong; compression is not negotiated through). It works for `wss://` (intercepted), `ws://`
-  inside a tunnel, and absolute-form upgrade requests sent straight to the proxy. Logging: a record when the handshake
-  succeeds (`Mode: websocket`, status 101) and a second one when the connection closes (`Mode: websocket-closed`,
-  with `ClientMessages`, `OriginMessages` and byte totals); a refused handshake passes the origin's status on (or 502/504)
-  and is logged as `rejected`. Capture: the upgrade request (`N_c.txt`), the origin's 101 response (`N_s.txt`) and every
-  message, text readable and binary as hex, in `N_w.txt`.
-  Supporting change: with interception on, a CONNECT is no longer assumed to be TLS. The first bytes decide: a TLS
-  handshake is decrypted, plain HTTP (such as `ws://` on port 80) goes to the HTTP layer, and anything else, or a silent
-  client (`SniffTimeout`, default 3 s, for protocols where the server speaks first), is relayed blindly.
-- Optional proxy authentication, and access control by client IP. **Dropped:** the listener only accepts loopback
-  connections, so there is nobody to authenticate or filter.
-- **Log rotation *(done)*:** `--log-max-mb N` (default 50, 0 = never rotate) and `--log-keep N` (default 5). When a write
-  would take `traffic.jsonl` past the limit it becomes `traffic.1.jsonl`, older files shift up (`.2`, `.3`, ...) and the
-  oldest beyond the keep count is deleted. A line larger than the limit is still written. If a rotation fails (for example
-  a viewer holds a file open) it is reported once, and logging carries on into the current file instead of losing lines.
-  A file left over from an earlier run is rotated on its first write. The capture folder is not rotated here (see the
-  safety limits discussion).
-- **Graceful shutdown with a drain period *(done)*:** `--drain-timeout SECONDS` (default 10, 0 = stop at once).
-  The first Ctrl+C stops accepting connections and reports what is in flight. During the drain, running requests finish;
-  tunnels keep going while data moves and end after 1 s of quiet; WebSockets are sent a close with code 1001; idle
-  keep-alive and HTTP/2 connections and connections that never sent anything are closed straight away. At the deadline
-  whatever is left is aborted (still logged and captured, with no status if nothing had been sent) and counted in the final
-  message. A second Ctrl+C skips the wait. The `--saz` archive is written only after all of that, so it is complete.
-  Note: `WebApplication.WaitForShutdownAsync` stops the host with its own time limit as soon as it is signalled, so
-  `ProxyHost.WaitForStopRequestAsync` is used instead, and `StopAsync` does the draining. The policy that ties it together,
-  "drain on a stop request, stop at once on a limit, skippable drain", lives in `ProxyHost.RunUntilStoppedAsync`
-  (it returns a `StopResult`: the reason, the shutdown report and any limit hit, even one hit while draining), so
-  `Program` only shows what is happening and picks the exit code (2 if any limit was hit). Verified with the test suite and
-  with a real process receiving a real console interrupt (one interrupt: the in-flight request completed and the archive
-  was written; two: the 30 s drain was skipped and the request aborted).
-- **Safety limits *(decided and done)*:** the decision was: no new caps (the log, the capture folder, connections, tunnels
-  and WebSockets may grow without bound), the proxy is not there to protect the machine, but when a real limit is hit it
-  must say which limit and stop rather than carry on while quietly losing data.
-  `ResourceLimits.Describe` recognizes the limits that mean the system ran out of something: a full disk
-  (`ERROR_DISK_FULL`/`ERROR_HANDLE_DISK_FULL`, "No space left on device"), too many open files, running out of memory, and
-  running out of sockets or network buffers; it also looks through wrapping exceptions. `ResourceLimitMonitor` is told
-  from the places that used to swallow these errors (a log sink failing, any capture file or body write, creating a
-  capture file, saving capture metadata, connecting to an origin or WebSocket, forwarding a request). For the first limit it
-  raises its `LimitReached` event once (a failing subscriber is ignored, so it cannot break the code that hit the limit)
-  and completes a task that the program waits on beside the Ctrl+C wait. The monitor prints nothing itself:
-  `ResourceLimitConsoleReporter` subscribes to the event and prints `Limit reached: <limit> (while <what was being done>).`
-  in red. On a limit the program stops at once with no drain period (it can no longer record what passes
-  through), still tries to write the `--saz` archive, prints `Stopped because a limit was reached: ...`, and exits with
-  code 2. Ordinary errors (a locked file, a permission error, an unreachable origin) are not limits and behave as before.
-  What was *not* changed: the existing explicit settings (`--capture-max-body`, the upstream, connect and idle timeouts, the
-  drain period) are options with their own documented behaviour, not "limits hit".
-  Tested in layers (classification including wrapped exceptions, once-only reporting, every failure point feeding the
-  monitor, and a real proxy whose log fails mid-request: the request still succeeds and the monitor is told). A real full
-  disk could not be reproduced on the development machine, so the stop-and-exit-code step in `Program.cs` has not been
-  seen end to end.
-- **`.saz` export *(done, not yet opened in Fiddler)*:** `SazExporter` packs a capture run folder into a `.saz` (a zip).
-  `--export-saz RUN_DIR [FILE]` converts an existing folder (default output: the folder path plus `.saz`), and `--saz`
-  (with `--capture`) writes the archive for the run when the proxy stops.
-  Layout, checked against Telerik's documentation and the `saz2har` reader (which matches `raw/(\d+)_(s|c|m|w)`):
-  `[Content_Types].xml`, `_index.htm` (a readable table of the sessions), and `raw/N_c.txt`, `raw/N_s.txt`, `raw/N_m.xml`
-  and, for WebSockets, `raw/N_w.txt`. The request, response and WebSocket files are copied unchanged; each `N_m.xml` is
-  rewritten from MoSaProxy's own metadata into Fiddler's `Session` form (`SID`, `BitFlags`, a `SessionTimers` element with
-  Fiddler's twelve timer attributes, and `SessionFlags`).
-  Known limits: (1) the Fiddler `Session` schema is not published, so it is written from the documented timer names and
-  the commonly seen layout, and has not been loaded in Fiddler itself; open an exported `.saz` in Fiddler to confirm.
-  (2) MoSaProxy only knows when an exchange ended and how long it took, so the request-side timers all equal the start time,
-  the response-side timers all equal the end time, and DNS, connect and TLS timings are 0. (3) `BitFlags` is 0 and
-  `PipeInfo` is omitted. (4) `N_w.txt` is MoSaProxy's readable layout, not Fiddler's own WebSocket format, so Fiddler may not
-  display the messages. (5) The `_c`/`_s` files hold the wire bytes (HTTP/1.x) or HTTP/1.1-style text decoded from the frames (HTTP/2) since Phase 6; the metadata flags `x-mosaproxy-request-source` and `x-mosaproxy-response-source` say which.
-- Not done, and not wanted in Phase 5: a viewer UI, and packaging. HAR export and the mitmproxy flow format are wanted, as
-  Core capabilities (see "Architecture goal" below); their timing is open.
-- Packaging as a Windows service or a single-file executable.
+### Byte-exact capture (Phase 6 leftovers)
 
-### Phase 6: Byte-exact capture (replace or bypass Kestrel)
+- A client that sends its request and then stops sending is treated by Kestrel as having gone away, so it is logged as
+  "client disconnected" and not answered. Fixing that needs our own HTTP/1.1 front end instead of Kestrel (the spike's option B).
+- The wire bytes of an exchange are held in memory until it ends. Keep capture off the hot path (a bounded queue with a defined
+  drop or back-pressure policy) if capture is found to slow forwarding.
+- Compare against a packet capture (needs a capture driver; the tests compare against the bytes a raw client and origin wrote).
+- Confirm the stop-on-a-limit path end to end: a real full disk could not be reproduced, so the stop and exit code 2 in `Program.cs` have not been seen on one.
 
-Goal: `N_c.txt` and `N_s.txt` contain exactly the bytes that crossed the wire, so the `.saz` matches what Fiddler
-would record. Everything up to Phase 5 runs on Kestrel; this phase removes that limitation. Three options,
-to be chosen by a spike at the start of the phase:
+### Packaging
 
-| Option | How | Pros | Cons |
-|---|---|---|---|
-| **A. Wire tap under Kestrel** | Keep Kestrel for parsing and forwarding, but copy the raw bytes before they are parsed. On the client side use a Kestrel connection middleware (`ListenOptions.Use(...)`), which sees the raw duplex stream; placed after the TLS middleware it sees decrypted bytes. On the origin side use `SocketsHttpHandler.PlaintextStreamFilter` (or `ConnectCallback`), which exposes the plaintext stream to the origin. | Smallest change; keeps Kestrel's HTTP/2, limits and security fixes. | Raw bytes arrive per connection, not per request, so they must be split into exchanges (keep-alive, pipelining, HTTP/2 multiplexing). The proxy still re-serializes headers, so the client-side and origin-side captures differ; that matches Fiddler (`_c` is what the client sent, `_s` is what the origin sent). |
-| **B. Own HTTP/1.1 front end** | Replace Kestrel with our own listener and parser that keeps the original bytes of each message. | Full control; byte-exact by construction; no framework behavior to work around. | We must write and maintain parsing, chunked, keep-alive and error handling, and security hardening. HTTP/2 would still need separate work (Phase 4's `SslStream` + framing code, or a library). |
-| **C. Fork Kestrel** | Fork the Kestrel sources from dotnet/aspnetcore and add capture hooks inside the parser. | Full HTTP/1.1 and HTTP/2 behavior with byte-level access. | Kestrel is a very large codebase with deep internal dependencies; the fork has to be kept in sync with upstream security fixes, and may not build outside the aspnetcore repo. Likely the highest long-term cost. |
+- Run as a Windows service, or ship as a single-file executable.
 
-Initial leaning: try **A** first, because it is the cheapest and its viability can be tested in a day. Fall back to
-**B** for HTTP/1.1 if the tap cannot deliver clean per-exchange bytes. **C** is the last resort.
+### Not wanted
 
-Notes for the spike:
-
-- Check how connection middleware and `PlaintextStreamFilter` behave with HTTP/2. Raw HTTP/2 is binary frames
-  (HPACK-compressed headers), so a byte-exact HTTP/2 capture is not readable text. Decide whether `_c.txt` /
-  `_s.txt` hold the raw frames for HTTP/2 or the HTTP/1.1-style rendering that Fiddler writes, and whether to store
-  both.
-- Make sure capture stays off the hot path (bounded queue, drop or back-pressure policy defined).
-- Confirm the final files open correctly in Fiddler.
-
-**Spike result (option A, run on 2026-10-07; throwaway code, not kept).** A wire tap works, and Kestrel can stay.
-The spike put a tap in a second connection middleware registered after `TunnelHandler`, so it sees the plain transport of
-ordinary connections and the decrypted transport of intercepted ones, and a `SocketsHttpHandler.PlaintextStreamFilter`
-tap on the proxy-to-origin connection. It compared the tapped bytes with the bytes a raw client and a raw origin
-really wrote (odd header casing and spacing, duplicate headers, chunked responses, a POST body, keep-alive):
-
-| Question | Result |
-|---|---|
-| Client-to-proxy bytes, plain HTTP/1.1 | Byte-identical, 3 requests on one connection. |
-| Same, inside an intercepted TLS tunnel | Byte-identical (decrypted). |
-| A malformed request Kestrel rejects with 400 before our handler runs | Still captured byte-identically, **provided the tap records bytes when they are read, not when Kestrel consumes them** (a rejected request is never consumed). |
-| Origin-to-proxy bytes (the server side of the `.saz`), plain and intercepted | Byte-identical, including chunk framing. This is what Fiddler's `_s.txt` holds. |
-| Splitting a connection's bytes into exchanges, HTTP/1.1 | Works with framing rules only (head, then `Content-Length` or chunked; a response needs the request method for HEAD, and 1xx/204/304 have no body). No real parser needed. |
-| Telling which exchange an HTTP/1.1 origin connection's bytes belong to | Works: an `AsyncLocal` set in the handler is visible to the tap at the moment `SocketsHttpHandler` writes the request (3 of 3). This relies on `SocketsHttpHandler` writing HTTP/1.1 requests on the caller's own async flow, which is not documented behaviour; keep a test on it. |
-| HTTP/2, client side | Raw frames captured, including the preface; they group by stream id, and the handler can read the stream id (`IHttp2StreamIdFeature`), so each request maps to its frames. |
-| HTTP/2, origin side | Raw frames captured, but **the exchange cannot be identified**: stream ids on the two legs differ and are assigned in a different order (concurrent `/a` and `/b` swapped), and the `AsyncLocal` is empty because HTTP/2 writes happen on the connection's own writer loop (0 of 4). Open options: decode the HPACK headers of each origin-side HEADERS frame to read `:path` and `:authority`; or use a separate origin connection per exchange when capturing (the filter's `InitialRequestMessage` then identifies it, at the cost of multiplexing). |
-| What Kestrel writes back to the client | Not the origin's bytes (headers re-ordered and re-cased, `Date` added, chunking re-done). This is expected, and fine: `_c.txt` is the client-to-proxy side and `_s.txt` the origin-to-proxy side, like Fiddler. |
-
-Recommendation: build option A. Options B and C are not needed for HTTP/1.1. HTTP/2 still needs two decisions: how the
-origin leg's frames are matched to exchanges (above), and whether `_c`/`_s` hold the raw frames or an HTTP/1.1-style
-rendering (the raw frames cannot be read as text because the headers are HPACK-compressed). Not covered by the spike:
-WebSockets (the tap is below the upgrade, so it should see the raw frames), request bodies sent chunked,
-`Expect: 100-continue`, pipelined requests, the cost of the tap on the hot path, and whether Fiddler opens the result.
-
-**Decisions after the spike.**
-
-1. *HTTP/2 capture:* tap the raw frames on both legs and decode the HPACK headers (`:path`, `:authority`, and the rest).
-   The decoded headers identify which exchange each origin-side stream belongs to, and they give the headers exactly as
-   sent, in their original order and casing, which Kestrel's and `HttpClient`'s parsed headers do not guarantee.
-   No per-exchange origin connections.
-2. *What `_c.txt` / `_s.txt` hold for HTTP/2, for now:* an HTTP/1.1-style rendering, built from the decoded frames (request
-   line from the pseudo-headers, then the headers in wire order, then the body). The raw frames themselves are not saved.
-   The format may change later, so how an exchange is rendered into the capture files should sit behind one seam (one
-   place that turns an exchange into the bytes of `_c`/`_s`), so that changing it later does not touch the proxy.
-
-HTTP/2 is therefore not "raw" in the byte sense: the saved text is a rendering, but one made from the wire headers.
-HTTP/1.1 (plain and intercepted) stays byte-exact.
-
-**Built so far (HTTP/1.1):** `WireTaps` (`core/WireTap/`) puts a tap in a connection middleware registered after the tunnel handler,
-and a `PlaintextStreamFilter` on the proxy's own origin connections. It is only installed when capture is on. Each exchange
-takes its exact request from the client connection's bytes (in order) and its exact response from the origin connection's
-bytes (found through an `AsyncLocal`), and `FileExchangeCapture` replaces the rebuilt `_c`/`_s` files with them. The body limit
-keeps the whole head and cuts the body. HTTP/2 connections, and WebSocket upgrades, are not recorded and keep the rebuilt files.
-Tests: `Http1Framing_Tests`, `WireTaps_Tests` (plain keep-alive with odd bytes, intercepted HTTPS, chunked request, body limit,
-HTTP/2 falls back to text).
-
-Each exchange's `N_m.xml` records where its two files came from, in `RequestSource` and `ResponseSource` (also exported as the
-`.saz` flags `x-mosaproxy-request-source` and `x-mosaproxy-response-source`): `wire` (the exact bytes), `http2-decoded`
-(decoded from HTTP/2 frames, headers in wire order, written as HTTP/1.1-style text; not produced yet), `parsed` (written
-from headers Kestrel or `HttpClient` had already parsed), or `generated` (written by the proxy itself, such as its own
-error pages and the reply to `CONNECT`). Tests: `CaptureSource_Tests`.
-
-When the wire bytes are expected (an HTTP/1.x request on a recorded connection; a response from a recorded origin connection), the
-file is not written while the exchange runs: only the head is kept in memory, and the file is written once, from the wire bytes,
-when the exchange ends. If the bytes never arrive, the file gets the kept head and `RequestBodyTruncated` /
-`ResponseBodyTruncated` say the body was not saved (the source is then `parsed`). Exchanges with nothing expected, such as
-HTTP/2, are still written as they run.
-
-**HTTP/2 (built).** `ConnectionWire` follows the client's frames once it sees the HTTP/2 preface, and `Http2OriginWire` follows both directions
-of a proxy-to-origin HTTP/2 connection (`core/Http2/`). Every header block is HPACK-decoded in order (`HpackDecoder`, with the
-Huffman table of RFC 7541; checked against the RFC's own examples). A client request is found by its stream id
-(`IHttp2StreamIdFeature`). An origin response is found by the method, `:authority` and `:path` of the requests the connection carried,
-because the two legs' stream ids differ; of several identical concurrent requests, the lowest stream id goes first. Each is written as
-HTTP/1.1-style text (`GET /path HTTP/2`, a `Host` line, then the headers in the order sent, lower case, then the body) and labelled
-`http2-decoded`. Streams that are not ordinary exchanges (an HTTP/2 `CONNECT`, which is how WebSockets run) are dropped. Trailers
-and `PUSH_PROMISE` are not supported (a push makes the direction give up and fall back to the `parsed` files). Tests: `HpackDecoder_Tests`,
-`Http2Capture_Tests`, `CaptureSource_Tests`.
-
-**Gaps closed after that.** The `CONNECT` exchange's `_c` file is now the exact request head the client sent (its `_s` file is the proxy's own
-reply, byte for byte). A request that Kestrel rejects before the handler runs (a malformed or oversized request), or that the client
-abandons part way, is now logged and captured as an exchange of its own (mode `rejected`): the tap sees the bytes left over when the
-connection ends and the start of what Kestrel wrote back (`TapWriter`), and stray blank lines between requests are not reported. A
-client that sends its request and at once stops sending was silently dropped by the tunnel handler; it is now logged. Tests:
-`UnusualRequests_Tests`.
-
-Known limits that remain: (1) Kestrel treats a client that stops sending as one that has gone away, so such a request is logged as
-"client disconnected" and not answered; fixing that would need our own front end (Phase 6 option B). (2) HTTP/2 trailers are not
-written, and `PUSH_PROMISE` is not supported. (3) The wire bytes of an exchange are held in memory until it ends. (4) Of several
-identical concurrent HTTP/2 requests, the responses can be swapped between them. (5) Not compared with a packet capture (it needs a
-capture driver; the tests compare against the bytes a raw client and origin wrote) and no `.saz` has been opened in Fiddler.
-
-**Done when:** for HTTP/1.1 traffic (plain and intercepted HTTPS), the bytes in `N_c.txt` and `N_s.txt` are identical
-to a packet-level capture of the same exchange, verified by tests against the fake origin and by comparison with
-Fiddler output for a sample session.
+A viewer UI beyond the browser UI above (such as a desktop viewer). Proxy authentication and access control by client IP (the listener accepts loopback connections only).
 
 ## Risks and notes
 
-- **Kestrel does not give byte-exact capture.** Until Phase 6, the capture files are reconstructions and may differ
-  from the wire (header spacing and casing, folded headers, chunk framing, malformed requests that Kestrel rejects
-  before our code runs). Anything that needs to see malformed or unusual traffic exactly will need Phase 6.
 - **Certificate pinning** (many mobile apps, some desktop apps) fails under interception. This is expected;
   fall back to tunnel mode for those hosts.
 - **Security of the CA key:** anyone with the root CA private key can impersonate any site to a client that trusts it.
-  Keep it local, never commit it (add to `.gitignore`), and make the install step explicit and removable.
+  Keep it local, never commit it, and make the install step explicit and removable.
 - **Binding:** loopback only, by design, with no option to listen on other interfaces. An open proxy on `0.0.0.0` can be abused.
 - **Privacy and legality:** log only traffic you own or have permission to inspect. Nothing is redacted: the JSONL log,
   raw session capture and `.saz` files all contain credentials and cookies, so keep them out of version control.
-- **Chrome quirks:** HSTS and HTTPS-upgrade mean most real-world sites need Phase 2 or 3 before they are usable.
-  `http://httpforever.com/` and `http://neverssl.com/` work for Phase 1 testing.
-- **Version drift:** the project targets `net10.0`. Check current `SocketsHttpHandler` and Kestrel HTTP/2 options
-  when starting Phases 3 and 4.
-
-## Suggested order of work
-
-1. Phase 1 (with tests), commit. *(done)*
-2. Phase 1b: capture folder, commit. *(done)*
-3. Phase 2, commit. *(done)*
-4. Phase 3 spike on the Kestrel / `SslStream` question, then the implementation. *(done)*
-5. Phase 4. *(done)*
-6. Phase 5 items, including the `.saz` writer. *(done, except the items dropped)*
-7. Phase 6: byte-exact capture. The spike chose option A (a wire tap). HTTP/1.1 *(done)*; HTTP/2 with HPACK decoding *(done)*; the smaller gaps and checking against Fiddler remain.
-8. Then, in no fixed order: HAR and mitmproxy flow export in Core, the Core cleanup (diagnostics events, a shared session
-   runner), and confirming an exported `.saz` opens in Fiddler.
+- **Chrome quirks:** HSTS and HTTPS-upgrade mean most real-world sites need a tunnel or interception to be usable.
+  `http://httpforever.com/` and `http://neverssl.com/` work for plain-HTTP testing.
+- **Version drift:** the project targets `net10.0`. Check current `SocketsHttpHandler` and Kestrel HTTP/2 options when upgrading.
+- **Reliance on undocumented behaviour:** matching an HTTP/1.1 origin connection's bytes to an exchange relies on
+  `SocketsHttpHandler` writing the request on the caller's own async flow (an `AsyncLocal`). Keep a test on it.

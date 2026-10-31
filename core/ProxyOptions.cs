@@ -44,8 +44,16 @@ public sealed class ProxyOptions {
 	/// <summary>A tunnel with no data moving in either direction for this long is closed.</summary>
 	public TimeSpan TunnelIdleTimeout { get; init; } = TimeSpan.FromMinutes(5);
 
-	/// <summary>Optional folder for per-exchange capture files. Each run gets its own sub-folder.</summary>
+	/// <summary>
+	/// Where the per-exchange capture files go. Capture is always on. When this is null (the command line cannot set it) the run's
+	/// files go in a folder of its own under <c>%TEMP%\MoSaProxyCaptures</c> (see <see cref="CaptureRun"/>), which is deleted when the
+	/// host is disposed. A folder given here is for tests and embedders: the run gets a sub-folder of it that the caller manages, so it
+	/// is not deleted.
+	/// </summary>
 	public string? CaptureDirectory { get; init; }
+
+	/// <summary>The folder that holds the temporary run folders when <see cref="CaptureDirectory"/> is null. Tests use another one so they can see exactly what a run leaves behind.</summary>
+	internal string TemporaryCaptureRoot { get; init; } = CaptureRun.DefaultRoot;
 
 	/// <summary>Optional cap on how many bytes of each request/response body are written to capture files.</summary>
 	public long? CaptureMaxBodyBytes { get; init; }
@@ -65,14 +73,8 @@ public sealed class ProxyOptions {
 	/// <summary>Remove the MoSaProxy root certificate from the Windows user's trusted roots, then exit (the proxy is not started).</summary>
 	public bool UntrustCa { get; init; }
 
-	/// <summary>Pack an existing capture run folder into a Fiddler .saz archive, then exit (the proxy is not started).</summary>
-	public string? ExportSazFolder { get; init; }
-
-	/// <summary>Where <see cref="ExportSazFolder"/> is written; null means next to the folder, with ".saz" added.</summary>
-	public string? ExportSazOutput { get; init; }
-
-	/// <summary>With capture on, also write this run's folder as a .saz archive when the proxy stops.</summary>
-	public bool SazOnShutdown { get; init; }
+	/// <summary>If set, the run's capture is also written to this Fiddler .saz file when the proxy stops, before the capture folder is deleted.</summary>
+	public string? SazPath { get; init; }
 
 	/// <summary>Start a browser that uses the proxy once it is listening.</summary>
 	public bool OpenBrowser { get; init; }

@@ -10,8 +10,8 @@ public static class ProxyOptionsParser {
 
 	/// <summary>Shown after an unknown argument.</summary>
 	public const string Usage =
-		"Usage: MoSaProxy [--port N] [--log FILE] [--capture DIR] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] " +
-		"[--intercept-bypass HOSTS] [--ca-dir DIR] [--untrust-ca] [--no-http2] [--saz] [--open [URL]] [--export-saz RUN_DIR [FILE]] [--log-max-mb N] " +
+		"Usage: MoSaProxy [--port N] [--log FILE] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] " +
+		"[--intercept-bypass HOSTS] [--ca-dir DIR] [--untrust-ca] [--no-http2] [--saz FILE] [--open [URL]] [--log-max-mb N] " +
 		"[--log-keep N] [--drain-timeout SECONDS]";
 
 	/// <exception cref="ArgumentException">An argument is unknown, is missing its value, or has a value that is out of range. The message is meant for the user.</exception>
@@ -19,7 +19,6 @@ public static class ProxyOptionsParser {
 		var defaults = new ProxyOptions();
 		int port = defaults.Port;
 		string? logPath = defaults.LogPath;
-		string? captureDirectory = defaults.CaptureDirectory;
 		long? captureMaxBody = defaults.CaptureMaxBodyBytes;
 		var connectTimeout = defaults.ConnectTimeout;
 		bool intercept = defaults.Intercept;
@@ -30,8 +29,7 @@ public static class ProxyOptionsParser {
 		long logMaxBytes = defaults.LogMaxBytes;
 		int logKeep = defaults.LogKeep;
 		var drainTimeout = defaults.DrainTimeout;
-		string? exportSazFolder = defaults.ExportSazFolder, exportSazOutput = defaults.ExportSazOutput;
-		bool sazOnShutdown = defaults.SazOnShutdown;
+		string? sazPath = defaults.SazPath;
 		bool openBrowser = defaults.OpenBrowser;
 		string? openUrl = defaults.OpenUrl;
 
@@ -45,10 +43,6 @@ public static class ProxyOptionsParser {
 					if (i + 1 >= args.Length) throw new ArgumentException("--log requires a file path.");
 					logPath = args[++i];
 					break;
-				case "--capture":
-					if (i + 1 >= args.Length) throw new ArgumentException("--capture requires a folder path.");
-					captureDirectory = args[++i];
-					break;
 				case "--capture-max-body":
 					if (i + 1 >= args.Length || !long.TryParse(args[++i], out long max) || max < 0)
 						throw new ArgumentException("--capture-max-body requires a number of bytes (0 or more).");
@@ -59,18 +53,13 @@ public static class ProxyOptionsParser {
 						throw new ArgumentException("--connect-timeout requires a number of seconds greater than 0 (up to 3600).");
 					connectTimeout = TimeSpan.FromSeconds(seconds);
 					break;
-				case "--export-saz":
-					if (i + 1 >= args.Length || args[i + 1].StartsWith("--"))
-						throw new ArgumentException("--export-saz requires the capture run folder to pack (and optionally the .saz file to write).");
-					exportSazFolder = args[++i];
-					if (i + 1 < args.Length && !args[i + 1].StartsWith("--")) exportSazOutput = args[++i];
-					break;
 				case "--open":
 					openBrowser = true;
 					if (i + 1 < args.Length && !args[i + 1].StartsWith("--")) openUrl = args[++i];
 					break;
 				case "--saz":
-					sazOnShutdown = true;
+					if (i + 1 >= args.Length || args[i + 1].StartsWith("--")) throw new ArgumentException("--saz requires the .saz file to write when the proxy stops.");
+					sazPath = args[++i];
 					break;
 				case "--log-max-mb":
 					if (i + 1 >= args.Length || !TryParseNumber(args[++i], out double megabytes) || megabytes < 0 || megabytes > 1_000_000)
@@ -109,12 +98,11 @@ public static class ProxyOptionsParser {
 		}
 
 		if (bypass.Count > 0 && !intercept) throw new ArgumentException("--intercept-bypass only makes sense together with --intercept.");
-		if (sazOnShutdown && captureDirectory is null) throw new ArgumentException("--saz needs --capture: the archive is made from the captured files.");
 
 		return new ProxyOptions {
-			Port = port, LogPath = logPath, CaptureDirectory = captureDirectory, CaptureMaxBodyBytes = captureMaxBody,
+			Port = port, LogPath = logPath, CaptureMaxBodyBytes = captureMaxBody,
 			ConnectTimeout = connectTimeout, Intercept = intercept, InterceptBypass = bypass, CaDirectory = caDirectory, UntrustCa = untrustCa, EnableHttp2 = http2,
-			ExportSazFolder = exportSazFolder, ExportSazOutput = exportSazOutput, SazOnShutdown = sazOnShutdown, OpenBrowser = openBrowser, OpenUrl = openUrl,
+			SazPath = sazPath, OpenBrowser = openBrowser, OpenUrl = openUrl,
 			LogMaxBytes = logMaxBytes, LogKeep = logKeep, DrainTimeout = drainTimeout,
 		};
 	}

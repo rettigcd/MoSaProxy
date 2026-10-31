@@ -23,13 +23,13 @@ A class is placed by its main focus. A line or two of console output inside an o
 
 | Category | Types |
 |---|---|
-| Core | 55 |
+| Core | 56 |
 | UI | 15 |
 | Mix | 0 |
 | Other | 0 |
-| **Total** | **70** (69 declared types, plus the `Program` class the compiler generates) |
+| **Total** | **71** (70 declared types, plus the `Program` class the compiler generates) |
 
-## Core (55)
+## Core (56)
 
 | Type | Kind | File | Why |
 |---|---|---|---|
@@ -60,7 +60,8 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `TlsApplicationProtocolFeature` | internal class | `TunnelHandler/TlsApplicationProtocolFeature.cs` | Tells Kestrel which protocol (`h2` or `http/1.1`) the handshake negotiated. |
 | `JsonLinesExchangeLog` | class | `ExchangeLog/JsonLinesExchangeLog.cs` | Writes the JSON Lines log, with rotation. |
 | `CompositeExchangeLog` | class | `ExchangeLog/CompositeExchangeLog.cs` | Sends each record to several logs and reports a failing one. |
-| `FileSessionCapture` | class | `SessionCapture/FileSessionCapture.cs` | Starts a capture run folder and numbers the exchanges. |
+| `FileSessionCapture` | class | `SessionCapture/FileSessionCapture.cs` | Writes into a capture run folder (its own, or one it is given) and numbers the exchanges. |
+| `CaptureRun` | class | `SessionCapture/CaptureRun.cs` | A run's temporary capture folder under `%TEMP%\MoSaProxyCaptures`: creates and locks it, deletes the folders of runs that are gone, and deletes its own on dispose. |
 | `FileExchangeCapture` | internal class | `SessionCapture/FileExchangeCapture.cs` | Writes one exchange's capture files: `N_c.txt` (request), `N_s.txt` (response), `N_w.txt` (WebSocket messages) and `N_m.xml` (metadata). |
 | `NullSessionCapture` | class | `SessionCapture/NullSessionCapture.cs` | Capture turned off. |
 | `NullExchangeCapture` | class | `SessionCapture/NullExchangeCapture.cs` | Capture turned off, per exchange. |
@@ -108,7 +109,7 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `ChromeLauncher` | static class | `ChromeLauncher.cs` | Builds the ready-to-paste Chrome commands shown to the user, and starts that Chrome for `--open`. |
 | `ProxyOptionsParser` | static class | `ProxyOptionsParser.cs` | Turns the command-line arguments into a `ProxyOptions`, and words the error and usage text. Starts from the defaults in `ProxyOptions`. |
 | `ResourceLimitConsoleReporter` | class | `ResourceLimitConsoleReporter.cs` | Subscribes to `ResourceLimitMonitor.LimitReached` and prints `Limit reached: ...` in red. |
-| `Program` (generated from `Program.cs`) | class | `Program.cs` | The console front end and orchestrator: parses the arguments, runs the `--untrust-ca` and `--export-saz` commands, wires the log, limit monitor and reporter, starts the host, shows the startup and stop messages, counts Ctrl+C presses, writes the `.saz`, and returns the exit code. The decisions about how to stop live in `ProxyHost.RunUntilStoppedAsync`. |
+| `Program` (generated from `Program.cs`) | class | `Program.cs` | The console front end and orchestrator: parses the arguments, runs the `--untrust-ca` command, wires the log, limit monitor and reporter, starts the host, shows the startup and stop messages, counts Ctrl+C presses, writes the `.saz` before the temporary capture folder is deleted, and returns the exit code. The decisions about how to stop live in `ProxyHost.RunUntilStoppedAsync`. |
 
 ## Mix (0)
 
@@ -158,8 +159,8 @@ These follow from the goal; none is decided or started.
 3. **Orchestration that every front end would repeat.** `Program` currently does these things, and a second front end would have to do them again:
    - build the logs and connect the limit monitor to them;
    - start the host, run until stopped, and report the result;
-   - export the `.saz` after the stop;
-   - run the `--untrust-ca` and `--export-saz` commands.
+   - export the `.saz` after the stop, before the host is disposed;
+   - run the `--untrust-ca` command.
 
    A Core "session" or "application" service that does them and returns structured results would leave each front end with only the presenting. `InterceptionSetup`'s flow and `ChromeLauncher` (above) belong in the same group.
 4. **Saving in several formats.** `.saz` is one exporter that reads a capture folder. `.har` and the mitmproxy flow format would each be another, so they should sit behind one common shape, and every front end gets all of them for free. They need more of the exchange's detail than `.saz` does; for example HAR has a timing breakdown, which the current metadata only approximates.

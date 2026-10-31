@@ -7,7 +7,7 @@ The comparison was made against one Fiddler-written file (Fiddler 6.0.20262.1002
 ## Summary
 
 - **Code:** `SazExporter` ([core/SazExporter/SazExporter.cs](../core/SazExporter/SazExporter.cs)) packs a capture run folder into a `.saz`.
-  From the console: `--saz` writes one when the proxy stops, and `--export-saz RUN_DIR [FILE]` converts an existing folder.
+  From the console: `--saz FILE` writes one when the proxy stops, from the run's temporary capture folder before it is deleted.
 - **Matches the reference file:** the zip layout (the `raw/` folder entry, entry order, file names padded to the width of the highest session number, comment naming MoSaProxy as the
   writer); `_m.xml` in Fiddler's form (BOM, CRLF, `Session` / `SessionTimers` / `PipeInfo` / `TunnelInfo` / `SessionFlags`, real timers and
   `BitFlags` where the proxy can observe them); `_index.htm` with Fiddler's twelve columns; `[Content_Types].xml` byte for byte; and the

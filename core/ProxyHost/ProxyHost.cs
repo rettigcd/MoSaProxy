@@ -10,11 +10,12 @@ public sealed class ProxyHost : IAsyncDisposable {
 	readonly ProxyHandler _handler;
 	readonly CancellationTokenSource _stopping;   // shutdown has begun: no new connections, idle ones wind down
 	readonly CancellationTokenSource _abort;      // the drain period is over: whatever is left is cut off
+	readonly CaptureRun? _captureRun;             // the temporary capture folder, deleted on dispose; null when the caller supplied the capture
 	readonly object _stopLock = new();
 	Task<ShutdownReport>? _stopTask;
 
 	ProxyHost(WebApplication app, ProxyHandler handler, ProxyActivity activity, ResourceLimitMonitor limits, CancellationTokenSource stopping,
-		CancellationTokenSource abort, int port, string? captureRunDirectory, CertificateAuthority? authority) {
+		CancellationTokenSource abort, int port, string? captureRunDirectory, CaptureRun? captureRun, CertificateAuthority? authority) {
 		_app = app;
 		_handler = handler;
 		Activity = activity;
@@ -23,14 +24,21 @@ public sealed class ProxyHost : IAsyncDisposable {
 		_abort = abort;
 		Port = port;
 		CaptureRunDirectory = captureRunDirectory;
+		_captureRun = captureRun;
 		Authority = authority;
 	}
 
 	/// <summary>The port actually bound (useful when the options asked for port 0).</summary>
 	public int Port { get; }
 
-	/// <summary>The folder this run's capture files go into, or null when capture is off or supplied by the caller.</summary>
+	/// <summary>
+	/// The folder this run's capture files go into, or null when the caller supplied the capture. Unless <see cref="ProxyOptions.CaptureDirectory"/>
+	/// was set, it is a temporary folder that is deleted when the host is disposed, so read or export it before then.
+	/// </summary>
 	public string? CaptureRunDirectory { get; }
+
+	/// <summary>Why the temporary capture folder could not be deleted when the host was disposed, or null if it was (or there is none to delete).</summary>
+	public string? CaptureCleanupError => _captureRun?.DeleteError;
 
 	/// <summary>The certificate authority used for HTTPS interception, or null when interception is off.</summary>
 	public CertificateAuthority? Authority { get; }
@@ -45,15 +53,25 @@ public sealed class ProxyHost : IAsyncDisposable {
 	public static async Task<ProxyHost> StartAsync(ProxyOptions options, IExchangeLog log, ISessionCapture? capture = null, ResourceLimitMonitor? limits = null) {
 		limits ??= new ResourceLimitMonitor();
 		string? runDirectory = null;
+		CaptureRun? captureRun = null;
 		if (capture is null) {
-			if (options.CaptureDirectory is null) capture = NullSessionCapture.Instance;
-			else {
-				var files = new FileSessionCapture(options.CaptureDirectory, options.CaptureMaxBodyBytes, limits);
-				runDirectory = files.RunDirectory;
-				capture = files;
+			FileSessionCapture files;
+			if (options.CaptureDirectory is null) {
+				captureRun = CaptureRun.Start(options.TemporaryCaptureRoot);
+				files = FileSessionCapture.InFolder(captureRun.Directory, options.CaptureMaxBodyBytes, limits);
 			}
+			else files = new FileSessionCapture(options.CaptureDirectory, options.CaptureMaxBodyBytes, limits);
+			runDirectory = files.RunDirectory;
+			capture = files;
 		}
 
+		// Starting can still fail (the port is taken, the certificate authority cannot be loaded): the folder must not be left behind.
+		try { return await StartListeningAsync(options, log, capture, limits, runDirectory, captureRun); }
+		catch { captureRun?.Dispose(); throw; }
+	}
+
+	static async Task<ProxyHost> StartListeningAsync(ProxyOptions options, IExchangeLog log, ISessionCapture capture, ResourceLimitMonitor limits,
+		string? runDirectory, CaptureRun? captureRun) {
 		var authority = options.Intercept ? CertificateAuthority.LoadOrCreate(options.CaDirectory) : null;
 		var activity = new ProxyActivity();
 		var stopping = new CancellationTokenSource();
@@ -84,7 +102,7 @@ public sealed class ProxyHost : IAsyncDisposable {
 		await app.StartAsync();
 
 		var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
-		return new ProxyHost(app, handler, activity, limits, stopping, abort, new Uri(address).Port, runDirectory, authority);
+		return new ProxyHost(app, handler, activity, limits, stopping, abort, new Uri(address).Port, runDirectory, captureRun, authority);
 	}
 
 	/// <summary>
@@ -176,5 +194,6 @@ public sealed class ProxyHost : IAsyncDisposable {
 		_handler.Dispose();
 		_stopping.Dispose();
 		_abort.Dispose();
+		_captureRun?.Dispose();   // last: the capture files are closed by now
 	}
 }

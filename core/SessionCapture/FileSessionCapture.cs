@@ -18,6 +18,16 @@ public sealed class FileSessionCapture : ISessionCapture {
 		RunDirectory = run;
 	}
 
+	FileSessionCapture(string runDirectory, long? maxBodyBytes, ResourceLimitMonitor? limits, bool alreadyCreated) {
+		_maxBodyBytes = maxBodyBytes;
+		_limits = limits;
+		RunDirectory = runDirectory;
+	}
+
+	/// <summary>Writes into a run folder that already exists (see <see cref="CaptureRun"/>), instead of making a new sub-folder.</summary>
+	public static FileSessionCapture InFolder(string runDirectory, long? maxBodyBytes = null, ResourceLimitMonitor? limits = null) =>
+		new(runDirectory, maxBodyBytes, limits, alreadyCreated: true);
+
 	public string RunDirectory { get; }
 
 	public IExchangeCapture BeginExchange() {

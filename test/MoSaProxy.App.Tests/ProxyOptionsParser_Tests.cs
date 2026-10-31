@@ -44,7 +44,6 @@ public class ProxyOptionsParser_Tests {
 	[Theory]
 	[InlineData("--port")]
 	[InlineData("--log")]
-	[InlineData("--capture")]
 	[InlineData("--capture-max-body")]
 	[InlineData("--connect-timeout")]
 	[InlineData("--intercept")]
@@ -54,7 +53,6 @@ public class ProxyOptionsParser_Tests {
 	[InlineData("--no-http2")]
 	[InlineData("--saz")]
 	[InlineData("--open")]
-	[InlineData("--export-saz")]
 	[InlineData("--log-max-mb")]
 	[InlineData("--log-keep")]
 	[InlineData("--drain-timeout")]
@@ -119,19 +117,18 @@ public class ProxyOptionsParser_Tests {
 	[Fact]
 	public void Parse_CaptureArguments_AreApplied() {
 
-		// Given: arguments enabling capture into a folder with a 1,000-byte body cap
-		var args = new[] { "--capture", "captures", "--capture-max-body", "1000" };
+		// Given: arguments setting a 1,000-byte body cap
+		var args = new[] { "--capture-max-body", "1000" };
 
 		// When: the options are parsed
 		var options = ProxyOptionsParser.Parse(args);
 
-		// Then: the options carry the folder and the cap
-		options.CaptureDirectory.ShouldBe("captures");
+		// Then: the options carry the cap
 		options.CaptureMaxBodyBytes.ShouldBe(1000);
 	}
 
 	[Fact]
-	public void Parse_NoCaptureArguments_LeavesCaptureOff() {
+	public void Parse_NoCaptureArguments_UsesTheTemporaryFolderAndNoBodyCap() {
 
 		// Given: no command-line arguments
 		var args = Array.Empty<string>();
@@ -139,7 +136,7 @@ public class ProxyOptionsParser_Tests {
 		// When: the options are parsed
 		var options = ProxyOptionsParser.Parse(args);
 
-		// Then: capture is off and there is no body cap
+		// Then: no folder is chosen (the run uses its own temporary one) and there is no body cap
 		options.CaptureDirectory.ShouldBeNull();
 		options.CaptureMaxBodyBytes.ShouldBeNull();
 	}
@@ -189,48 +186,47 @@ public class ProxyOptionsParser_Tests {
 	}
 
 	[Fact]
-	public void Parse_ExportSazWithFolderOnly_LeavesTheOutputToTheDefault() {
+	public void Parse_SazWithAFile_SetsTheArchivePath() {
 
-		// Given: arguments asking to export one capture folder
-		var args = new[] { "--export-saz", "captures/20261006-120000" };
-
-		// When: the options are parsed
-		var options = ProxyOptionsParser.Parse(args);
-
-		// Then: the folder is set and no output file was chosen
-		options.ExportSazFolder.ShouldBe("captures/20261006-120000");
-		options.ExportSazOutput.ShouldBeNull();
-	}
-
-	[Fact]
-	public void Parse_ExportSazWithFolderAndFile_SetsBoth() {
-
-		// Given: arguments naming the folder to export and the archive to write, followed by another option
-		var args = new[] { "--export-saz", "run1", "my.saz", "--port", "9000" };
+		// Given: --saz naming the archive to write, followed by another option
+		var args = new[] { "--saz", "my.saz", "--port", "9000" };
 
 		// When: the options are parsed
 		var options = ProxyOptionsParser.Parse(args);
 
-		// Then: both paths are set and the following option is still understood
-		options.ExportSazFolder.ShouldBe("run1");
-		options.ExportSazOutput.ShouldBe("my.saz");
+		// Then: the path is set and the following option is still understood
+		options.SazPath.ShouldBe("my.saz");
 		options.Port.ShouldBe(9000);
 	}
 
 	[Fact]
-	public void Parse_SazWithCapture_IsAcceptedAndWithoutCaptureIsRefused() {
+	public void Parse_NoSazArgument_WritesNoArchive() {
 
-		// Given: --saz together with --capture, and --saz on its own
-		var withCapture = new[] { "--capture", "captures", "--saz" };
-		var alone = new[] { "--saz" };
+		// Given: no command-line arguments
+		var args = Array.Empty<string>();
 
-		// When: both are parsed
-		var accepted = ProxyOptionsParser.Parse(withCapture);
-		var refused = () => ProxyOptionsParser.Parse(alone);
+		// When: the options are parsed
+		var options = ProxyOptionsParser.Parse(args);
 
-		// Then: the first turns on the archive at shutdown, and the second is an error because there would be nothing to pack
-		accepted.SazOnShutdown.ShouldBeTrue();
-		Should.Throw<ArgumentException>(refused);
+		// Then: no archive is written
+		options.SazPath.ShouldBeNull();
+	}
+
+	[Theory]
+	[InlineData("--saz")]
+	[InlineData("--saz", "--port", "9000")]
+	[InlineData("--capture", "captures")]
+	[InlineData("--export-saz", "run1")]
+	public void Parse_SazWithoutAFileOrRemovedOptions_Throws(params string[] args) {
+
+		// Given: --saz with no file after it, and the removed --capture and --export-saz options
+		// (supplied by the test data)
+
+		// When: the options are parsed
+		var parse = () => ProxyOptionsParser.Parse(args);
+
+		// Then: parsing fails, because there is nothing to write to, or the option no longer exists
+		Should.Throw<ArgumentException>(parse);
 	}
 
 	[Fact]
@@ -287,19 +283,6 @@ public class ProxyOptionsParser_Tests {
 
 		// Then: the browser is not opened
 		options.OpenBrowser.ShouldBeFalse();
-	}
-
-	[Fact]
-	public void Parse_ExportSazWithoutAFolder_Throws() {
-
-		// Given: --export-saz followed directly by another option
-		var args = new[] { "--export-saz", "--port", "9000" };
-
-		// When: the options are parsed
-		var parse = () => ProxyOptionsParser.Parse(args);
-
-		// Then: parsing fails, because the folder to export is missing
-		Should.Throw<ArgumentException>(parse);
 	}
 
 	[Fact]
@@ -452,7 +435,6 @@ public class ProxyOptionsParser_Tests {
 	}
 
 	[Theory]
-	[InlineData("--capture")]
 	[InlineData("--capture-max-body")]
 	[InlineData("--capture-max-body", "-5")]
 	[InlineData("--capture-max-body", "lots")]
