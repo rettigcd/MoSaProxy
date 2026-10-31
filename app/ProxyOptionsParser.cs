@@ -10,7 +10,7 @@ public static class ProxyOptionsParser {
 
 	/// <summary>Shown after an unknown argument.</summary>
 	public const string Usage =
-		"Usage: MoSaProxy [--port N] [--log FILE] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] " +
+		"Usage: MoSaProxy [--port N] [--log FILE] [--no-capture] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] " +
 		"[--intercept-bypass HOSTS] [--ca-dir DIR] [--untrust-ca] [--no-http2] [--saz FILE] [--open [URL]] [--log-max-mb N] " +
 		"[--log-keep N] [--drain-timeout SECONDS]";
 
@@ -20,6 +20,7 @@ public static class ProxyOptionsParser {
 		int port = defaults.Port;
 		string? logPath = defaults.LogPath;
 		long? captureMaxBody = defaults.CaptureMaxBodyBytes;
+		bool captureEnabled = defaults.CaptureEnabled;
 		var connectTimeout = defaults.ConnectTimeout;
 		bool intercept = defaults.Intercept;
 		var bypass = new List<string>(defaults.InterceptBypass);
@@ -42,6 +43,9 @@ public static class ProxyOptionsParser {
 				case "--log":
 					if (i + 1 >= args.Length) throw new ArgumentException("--log requires a file path.");
 					logPath = args[++i];
+					break;
+				case "--no-capture":
+					captureEnabled = false;
 					break;
 				case "--capture-max-body":
 					if (i + 1 >= args.Length || !long.TryParse(args[++i], out long max) || max < 0)
@@ -100,7 +104,7 @@ public static class ProxyOptionsParser {
 		if (bypass.Count > 0 && !intercept) throw new ArgumentException("--intercept-bypass only makes sense together with --intercept.");
 
 		return new ProxyOptions {
-			Port = port, LogPath = logPath, CaptureMaxBodyBytes = captureMaxBody,
+			Port = port, LogPath = logPath, CaptureMaxBodyBytes = captureMaxBody, CaptureEnabled = captureEnabled,
 			ConnectTimeout = connectTimeout, Intercept = intercept, InterceptBypass = bypass, CaDirectory = caDirectory, UntrustCa = untrustCa, EnableHttp2 = http2,
 			SazPath = sazPath, OpenBrowser = openBrowser, OpenUrl = openUrl,
 			LogMaxBytes = logMaxBytes, LogKeep = logKeep, DrainTimeout = drainTimeout,

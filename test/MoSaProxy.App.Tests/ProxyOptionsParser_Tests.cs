@@ -44,6 +44,7 @@ public class ProxyOptionsParser_Tests {
 	[Theory]
 	[InlineData("--port")]
 	[InlineData("--log")]
+	[InlineData("--no-capture")]
 	[InlineData("--capture-max-body")]
 	[InlineData("--connect-timeout")]
 	[InlineData("--intercept")]
@@ -183,6 +184,22 @@ public class ProxyOptionsParser_Tests {
 		options.Intercept.ShouldBeFalse();
 		options.InterceptBypass.ShouldBeEmpty();
 		options.CaDirectory.ShouldBe(ProxyOptions.DefaultCaDirectory);
+	}
+
+	[Fact]
+	public void Parse_NoCapture_StartsWithCaptureOffAndOtherwiseItIsOn() {
+
+		// Given: arguments with --no-capture, and no arguments at all
+		var off = new[] { "--no-capture" };
+		var none = Array.Empty<string>();
+
+		// When: both are parsed
+		var withFlag = ProxyOptionsParser.Parse(off);
+		var without = ProxyOptionsParser.Parse(none);
+
+		// Then: capture starts off only when asked
+		withFlag.CaptureEnabled.ShouldBeFalse();
+		without.CaptureEnabled.ShouldBeTrue();
 	}
 
 	[Fact]

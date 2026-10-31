@@ -10,12 +10,13 @@ public sealed class ProxyHost : IAsyncDisposable {
 	readonly ProxyHandler _handler;
 	readonly CancellationTokenSource _stopping;   // shutdown has begun: no new connections, idle ones wind down
 	readonly CancellationTokenSource _abort;      // the drain period is over: whatever is left is cut off
+	readonly SwitchableSessionCapture _capture;
 	readonly CaptureRun? _captureRun;             // the temporary capture folder, deleted on dispose; null when the caller supplied the capture
 	readonly object _stopLock = new();
 	Task<ShutdownReport>? _stopTask;
 
 	ProxyHost(WebApplication app, ProxyHandler handler, ProxyActivity activity, ResourceLimitMonitor limits, CancellationTokenSource stopping,
-		CancellationTokenSource abort, int port, string? captureRunDirectory, CaptureRun? captureRun, CertificateAuthority? authority) {
+		CancellationTokenSource abort, int port, string? captureRunDirectory, CaptureRun? captureRun, SwitchableSessionCapture capture, CertificateAuthority? authority) {
 		_app = app;
 		_handler = handler;
 		Activity = activity;
@@ -25,6 +26,7 @@ public sealed class ProxyHost : IAsyncDisposable {
 		Port = port;
 		CaptureRunDirectory = captureRunDirectory;
 		_captureRun = captureRun;
+		_capture = capture;
 		Authority = authority;
 	}
 
@@ -36,6 +38,15 @@ public sealed class ProxyHost : IAsyncDisposable {
 	/// was set, it is a temporary folder that is deleted when the host is disposed, so read or export it before then.
 	/// </summary>
 	public string? CaptureRunDirectory { get; }
+
+	/// <summary>
+	/// Whether exchanges that begin now are captured. Switch it off to stop the capture files growing (traffic is still forwarded and
+	/// logged), and on again to carry on numbering where it stopped. An exchange already running is not affected.
+	/// </summary>
+	public bool CaptureEnabled {
+		get => _capture.Enabled;
+		set => _capture.Enabled = value;
+	}
 
 	/// <summary>Why the temporary capture folder could not be deleted when the host was disposed, or null if it was (or there is none to delete).</summary>
 	public string? CaptureCleanupError => _captureRun?.DeleteError;
@@ -66,18 +77,22 @@ public sealed class ProxyHost : IAsyncDisposable {
 		}
 
 		// Starting can still fail (the port is taken, the certificate authority cannot be loaded): the folder must not be left behind.
-		try { return await StartListeningAsync(options, log, capture, limits, runDirectory, captureRun); }
+		var switchable = new SwitchableSessionCapture(capture, options.CaptureEnabled);
+		// Exact wire bytes are only recorded when something keeps them.
+		bool tapWire = capture is not NullSessionCapture;
+		try { return await StartListeningAsync(options, log, switchable, tapWire, limits, runDirectory, captureRun); }
 		catch { captureRun?.Dispose(); throw; }
 	}
 
-	static async Task<ProxyHost> StartListeningAsync(ProxyOptions options, IExchangeLog log, ISessionCapture capture, ResourceLimitMonitor limits,
+	static async Task<ProxyHost> StartListeningAsync(ProxyOptions options, IExchangeLog log, SwitchableSessionCapture capture, bool tapWire, ResourceLimitMonitor limits,
 		string? runDirectory, CaptureRun? captureRun) {
 		var authority = options.Intercept ? CertificateAuthority.LoadOrCreate(options.CaDirectory) : null;
 		var activity = new ProxyActivity();
 		var stopping = new CancellationTokenSource();
 		var abort = new CancellationTokenSource();
-		// Exact wire bytes are only recorded when something keeps them.
-		var wireTaps = capture is NullSessionCapture ? null : new WireTaps(limits, log, capture);
+		// The taps cannot be added later, so they are always there when anything can keep what they record; an exchange that is not
+		// captured still takes its wire bytes, which frees them.
+		var wireTaps = tapWire ? new WireTaps(limits, log, capture) : null;
 		var tunnels = new TunnelHandler(log, capture, options, stopping.Token, abort.Token, activity, limits, authority);
 		var builder = WebApplication.CreateSlimBuilder();
 		builder.Logging.ClearProviders();
@@ -102,7 +117,7 @@ public sealed class ProxyHost : IAsyncDisposable {
 		await app.StartAsync();
 
 		var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
-		return new ProxyHost(app, handler, activity, limits, stopping, abort, new Uri(address).Port, runDirectory, captureRun, authority);
+		return new ProxyHost(app, handler, activity, limits, stopping, abort, new Uri(address).Port, runDirectory, captureRun, capture, authority);
 	}
 
 	/// <summary>

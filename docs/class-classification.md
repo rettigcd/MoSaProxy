@@ -23,13 +23,13 @@ A class is placed by its main focus. A line or two of console output inside an o
 
 | Category | Types |
 |---|---|
-| Core | 56 |
+| Core | 57 |
 | UI | 15 |
 | Mix | 0 |
 | Other | 0 |
-| **Total** | **71** (70 declared types, plus the `Program` class the compiler generates) |
+| **Total** | **72** (71 declared types, plus the `Program` class the compiler generates) |
 
-## Core (56)
+## Core (57)
 
 | Type | Kind | File | Why |
 |---|---|---|---|
@@ -61,6 +61,7 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `JsonLinesExchangeLog` | class | `ExchangeLog/JsonLinesExchangeLog.cs` | Writes the JSON Lines log, with rotation. |
 | `CompositeExchangeLog` | class | `ExchangeLog/CompositeExchangeLog.cs` | Sends each record to several logs and reports a failing one. |
 | `FileSessionCapture` | class | `SessionCapture/FileSessionCapture.cs` | Writes into a capture run folder (its own, or one it is given) and numbers the exchanges. |
+| `SwitchableSessionCapture` | class | `SessionCapture/SwitchableSessionCapture.cs` | Capture that can be switched on and off while the proxy runs; an exchange is captured whole or not at all. |
 | `CaptureRun` | class | `SessionCapture/CaptureRun.cs` | A run's temporary capture folder under `%TEMP%\MoSaProxyCaptures`: creates and locks it, deletes the folders of runs that are gone, and deletes its own on dispose. |
 | `FileExchangeCapture` | internal class | `SessionCapture/FileExchangeCapture.cs` | Writes one exchange's capture files: `N_c.txt` (request), `N_s.txt` (response), `N_w.txt` (WebSocket messages) and `N_m.xml` (metadata). |
 | `NullSessionCapture` | class | `SessionCapture/NullSessionCapture.cs` | Capture turned off. |

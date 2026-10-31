@@ -74,6 +74,10 @@ not redacted. `--capture-max-body BYTES` keeps the whole head and cuts the body.
   folder directly in `MoSaProxyCaptures` is a run folder. A running proxy holds a `.lock` file in its folder open exclusively, and
   a folder is deleted only if that file can be opened, so a second MoSaProxy never deletes the first one's folder. The check and
   the creation of a new folder happen under one machine-wide lock.
+- **Capture switch.** Capture starts on, or off with `--no-capture`, and `ProxyHost.CaptureEnabled` turns it on or off while the
+  proxy runs. While it is off, traffic is still forwarded and logged; only the capture files stop growing. An exchange that began
+  while it was on is captured to its end, one that began while it was off is not captured at all, and numbering continues without
+  a gap. (Nothing outside Core can switch it yet: the API and UI are planned.)
 - **Byte-exact for HTTP/1.1**, plain and intercepted: a wire tap under Kestrel (`core/WireTap/`) copies the bytes the client sent
   and the bytes the origin sent, including odd casing, header order and chunk framing. Malformed or abandoned requests that
   Kestrel rejects are captured too.

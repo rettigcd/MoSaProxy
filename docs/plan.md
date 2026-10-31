@@ -71,7 +71,7 @@ Build in this order:
    - An exchange store: a stable id per exchange (the capture number `N`), summaries for listing, the full record for one
      exchange, and the request and response bytes. The store is the temporary capture folder (`CaptureRun`), so it is always
      there and the UI always works.
-   - **A capture switch, on or off while the program runs.** The point is to turn capture on, run the tests you want, then turn it
+   - **A capture switch, on or off while the program runs. Built in Core** (`SwitchableSessionCapture`, `ProxyHost.CaptureEnabled`, `--no-capture`); the API endpoint and UI control are still to do. The point is to turn capture on, run the tests you want, then turn it
      off to avoid noise while you analyze or save the captured files. While it is off, traffic is still forwarded and still
      appears in the console and the JSON Lines log; only the capture files (and so the UI's exchange list and the `.saz`) stop
      growing. Design points:

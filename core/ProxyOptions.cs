@@ -55,6 +55,12 @@ public sealed class ProxyOptions {
 	/// <summary>The folder that holds the temporary run folders when <see cref="CaptureDirectory"/> is null. Tests use another one so they can see exactly what a run leaves behind.</summary>
 	internal string TemporaryCaptureRoot { get; init; } = CaptureRun.DefaultRoot;
 
+	/// <summary>
+	/// Whether capture is on when the proxy starts. It can be switched while running (see <see cref="ProxyHost.CaptureEnabled"/>).
+	/// While it is off, traffic is still forwarded and logged; only the capture files stop growing.
+	/// </summary>
+	public bool CaptureEnabled { get; init; } = true;
+
 	/// <summary>Optional cap on how many bytes of each request/response body are written to capture files.</summary>
 	public long? CaptureMaxBodyBytes { get; init; }
 
