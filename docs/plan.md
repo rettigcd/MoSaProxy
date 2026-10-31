@@ -50,8 +50,9 @@ Core should hold everything that is not tied to a user interface, and each front
 
 The temporary capture folder is built (see [capabilities.md](capabilities.md)). What is left:
 
-- Decide whether to offer a way to turn capture off for pure forwarding. Every body is written to disk on every run, and credentials
-  and cookies reach the temp folder even when no export is asked for. `--capture-max-body` limits the size, not the exposure.
+- Capture is not turned off for good: it is switched on and off while the program runs, from the API and UI (see the capture switch
+  under "Browser UI" step 1). There is no need to leave the encrypted bytes of a blind tunnel out, because they are never captured.
+  The `.saz` does not hold them either (spec section 5.1).
 - Run the real program with a real console interrupt, to see the `--saz` archive written before the folder is deleted. The two
   parts are tested separately, and a killed process was checked by hand (the next start deleted its folder), but the graceful path
   through `Program.cs` has not been seen end to end.
@@ -70,6 +71,19 @@ Build in this order:
    - An exchange store: a stable id per exchange (the capture number `N`), summaries for listing, the full record for one
      exchange, and the request and response bytes. The store is the temporary capture folder (`CaptureRun`), so it is always
      there and the UI always works.
+   - **A capture switch, on or off while the program runs.** The point is to turn capture on, run the tests you want, then turn it
+     off to avoid noise while you analyze or save the captured files. While it is off, traffic is still forwarded and still
+     appears in the console and the JSON Lines log; only the capture files (and so the UI's exchange list and the `.saz`) stop
+     growing. Design points:
+     - The proxy asks one `ISessionCapture`; make that a switchable wrapper around the file capture and the null capture, so no
+       other code knows whether capture is on.
+     - The wire taps are installed only when capture is on today (`capture is NullSessionCapture`). They have to be installed
+       always and told whether to record, because Kestrel's middleware cannot be added later.
+     - An exchange that began while capture was on is captured to its end, and one that began while it was off is not captured
+       at all, so no exchange is half written. Numbers continue where they left off, so the files stay in order.
+     - The state belongs to Core, so `Program` and the API only set it. The starting state is open: on, as today, is the
+       suggestion, with a command-line option to start with it off.
+     - Switching it does not touch what is already captured. Clearing the captured files is a separate action.
    - An event for "exchange started" and "exchange finished" (so the UI can show a request that is still running), replacing
      direct console output.
    - Tests in `test/MoSaProxy.Core.Tests` through the Core types only, with no web server.
@@ -85,6 +99,8 @@ Build in this order:
    | `GET /api/exchanges/{id}/response` | The response exactly as captured (`N_s.txt`), as bytes. |
    | `GET /api/exchanges/{id}/request/body`, `.../response/body` | Just the body. `?decode=true` undoes `Content-Encoding` and chunking so the UI can show text, images and JSON. |
    | `GET /api/exchanges/{id}/websocket` | The messages of a WebSocket exchange (direction, time, type, size, text or hex). |
+   | `GET /api/capture` | Whether capture is on, and how many exchanges are captured so far. |
+   | `PUT /api/capture` | Body `{ "enabled": true }` or `false`: turns capture on or off, and answers with the new state. The stream sends a `capture` event on each change so every open page stays in step. |
    | `GET /api/stream` | Server-Sent Events: one event when an exchange starts, one when it finishes, and one per WebSocket message. Supports `Last-Event-ID` so a reconnecting page misses nothing. |
    | `GET /api/export/saz` | Downloads a `.saz` of all exchanges, or of those named in `?ids=`. |
    | `POST /api/stop` | Starts the graceful shutdown (the drain period), like the first Ctrl+C. |
@@ -107,7 +123,7 @@ Build in this order:
      - Tests: the description is valid OpenAPI, every mapped endpoint appears in it with a summary, and each response type
        matches what the endpoint really returns (spot-checked through the real listener).
 
-   Left for later: changing settings while running (the options are fixed at start-up today), clearing the capture, replaying a
+   Left for later: changing other settings while running (the options are fixed at start-up today), clearing the captured exchanges (turning capture off already stops new ones), replaying a
    request, and the HAR and mitmproxy exports (add `/api/export/har` and `/api/export/flow` when those formats exist).
    - **Safety.** The listener is loopback-only. The UI shows credentials and cookies, and a web page on another site could
      try to call a local API, so every request must be checked: reject a wrong `Host` header (DNS rebinding), reject any
