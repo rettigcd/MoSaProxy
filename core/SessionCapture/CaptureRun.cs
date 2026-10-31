@@ -44,9 +44,9 @@ public sealed class CaptureRun : IDisposable {
 			System.IO.Directory.CreateDirectory(root);
 			foreach (string folder in System.IO.Directory.EnumerateDirectories(root)) DeleteIfAbandoned(folder);
 
-			string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
-			string run = Path.Combine(root, stamp);
-			for (int i = 2; System.IO.Directory.Exists(run); i++) run = Path.Combine(root, $"{stamp}-{i}");
+			// The name is never reused: a run that was disposed may still be retrying its delete by path, and a new run that took the
+			// same name would lose its files to that retry.
+			string run = Path.Combine(root, $"{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..8]}");
 			System.IO.Directory.CreateDirectory(run);
 			var lockFile = new FileStream(Path.Combine(run, LockFileName), FileMode.CreateNew, FileAccess.Write, FileShare.None);
 			return new CaptureRun(run, lockFile);

@@ -11,12 +11,13 @@ public sealed class ProxyHost : IAsyncDisposable {
 	readonly CancellationTokenSource _stopping;   // shutdown has begun: no new connections, idle ones wind down
 	readonly CancellationTokenSource _abort;      // the drain period is over: whatever is left is cut off
 	readonly SwitchableSessionCapture _capture;
+	readonly CaptureEvents _events;
 	readonly CaptureRun? _captureRun;             // the temporary capture folder, deleted on dispose; null when the caller supplied the capture
 	readonly object _stopLock = new();
 	Task<ShutdownReport>? _stopTask;
 
 	ProxyHost(WebApplication app, ProxyHandler handler, ProxyActivity activity, ResourceLimitMonitor limits, CancellationTokenSource stopping,
-		CancellationTokenSource abort, int port, string? captureRunDirectory, CaptureRun? captureRun, SwitchableSessionCapture capture, CertificateAuthority? authority) {
+		CancellationTokenSource abort, int port, string? captureRunDirectory, CaptureRun? captureRun, SwitchableSessionCapture capture, CaptureEvents events, CertificateAuthority? authority) {
 		_app = app;
 		_handler = handler;
 		Activity = activity;
@@ -27,6 +28,8 @@ public sealed class ProxyHost : IAsyncDisposable {
 		CaptureRunDirectory = captureRunDirectory;
 		_captureRun = captureRun;
 		_capture = capture;
+		_events = events;
+		Exchanges = captureRunDirectory is null ? null : new ExchangeStore(captureRunDirectory);
 		Authority = authority;
 	}
 
@@ -45,8 +48,18 @@ public sealed class ProxyHost : IAsyncDisposable {
 	/// </summary>
 	public bool CaptureEnabled {
 		get => _capture.Enabled;
-		set => _capture.Enabled = value;
+		set {
+			bool changed = _capture.Enabled != value;
+			_capture.Enabled = value;
+			if (changed) _events.RaiseCaptureEnabledChanged(value);
+		}
 	}
+
+	/// <summary>The exchanges captured so far, to list and read; null when the caller supplied its own capture, which is not a folder this host knows.</summary>
+	public ExchangeStore? Exchanges { get; }
+
+	/// <summary>Announcements about captured exchanges and the capture switch, for a front end that shows them live.</summary>
+	public CaptureEvents Events => _events;
 
 	/// <summary>Why the temporary capture folder could not be deleted when the host was disposed, or null if it was (or there is none to delete).</summary>
 	public string? CaptureCleanupError => _captureRun?.DeleteError;
@@ -77,14 +90,15 @@ public sealed class ProxyHost : IAsyncDisposable {
 		}
 
 		// Starting can still fail (the port is taken, the certificate authority cannot be loaded): the folder must not be left behind.
-		var switchable = new SwitchableSessionCapture(capture, options.CaptureEnabled);
+		var events = new CaptureEvents();
+		var switchable = new SwitchableSessionCapture(new ObservedSessionCapture(capture, events), options.CaptureEnabled);
 		// Exact wire bytes are only recorded when something keeps them.
 		bool tapWire = capture is not NullSessionCapture;
-		try { return await StartListeningAsync(options, log, switchable, tapWire, limits, runDirectory, captureRun); }
+		try { return await StartListeningAsync(options, log, switchable, events, tapWire, limits, runDirectory, captureRun); }
 		catch { captureRun?.Dispose(); throw; }
 	}
 
-	static async Task<ProxyHost> StartListeningAsync(ProxyOptions options, IExchangeLog log, SwitchableSessionCapture capture, bool tapWire, ResourceLimitMonitor limits,
+	static async Task<ProxyHost> StartListeningAsync(ProxyOptions options, IExchangeLog log, SwitchableSessionCapture capture, CaptureEvents events, bool tapWire, ResourceLimitMonitor limits,
 		string? runDirectory, CaptureRun? captureRun) {
 		var authority = options.Intercept ? CertificateAuthority.LoadOrCreate(options.CaDirectory) : null;
 		var activity = new ProxyActivity();
@@ -117,7 +131,7 @@ public sealed class ProxyHost : IAsyncDisposable {
 		await app.StartAsync();
 
 		var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
-		return new ProxyHost(app, handler, activity, limits, stopping, abort, new Uri(address).Port, runDirectory, captureRun, capture, authority);
+		return new ProxyHost(app, handler, activity, limits, stopping, abort, new Uri(address).Port, runDirectory, captureRun, capture, events, authority);
 	}
 
 	/// <summary>

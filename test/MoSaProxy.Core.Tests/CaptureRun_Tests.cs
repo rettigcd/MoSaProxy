@@ -64,6 +64,23 @@ public class CaptureRun_Tests {
 	}
 
 	[Fact]
+	public void Start_AfterEarlierRunsWereDisposed_NeverReusesAFolderName() {
+
+		// Given: a root folder where fifty runs start and are disposed one after another, within a second or two
+		using var folder = new TempFolder();
+		var names = new List<string>();
+
+		// When: each run's folder name is noted
+		for (int i = 0; i < 50; i++) {
+			using var run = CaptureRun.Start(folder.Path);
+			names.Add(run.Directory);
+		}
+
+		// Then: no name was used twice, so a disposed run still deleting by path can never hit a newer run's folder
+		names.Distinct().Count().ShouldBe(50);
+	}
+
+	[Fact]
 	public void Start_FolderOfARunThatIsGone_IsDeleted() {
 
 		// Given: folders left by runs that were killed: one with a lock file nobody holds and a capture file, and one with no lock file

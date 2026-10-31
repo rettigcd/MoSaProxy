@@ -66,7 +66,7 @@ Capture is always on. Each run writes, for every exchange, `N_c.txt` (the reques
 (metadata), numbered from 1 in the order requests arrive. WebSockets also get `N_w.txt` (readable text, binary as hex). Capture is
 not redacted. `--capture-max-body BYTES` keeps the whole head and cuts the body.
 
-- **Temporary folder.** The files go in a folder of the run's own, `%TEMP%\MoSaProxyCaptures\<date-time>` (`CaptureRun`), and the
+- **Temporary folder.** The files go in a folder of the run's own, `%TEMP%\MoSaProxyCaptures\<date-time>-<id>` (`CaptureRun`), and the
   folder is deleted when the program exits: a normal stop, a stop on a limit, or an unhandled error. There is no option to keep it;
   `--saz FILE` is how a session is kept. If the folder cannot be deleted (a viewer holds a file open) the program says so and
   exits anyway.
@@ -78,6 +78,11 @@ not redacted. `--capture-max-body BYTES` keeps the whole head and cuts the body.
   proxy runs. While it is off, traffic is still forwarded and logged; only the capture files stop growing. An exchange that began
   while it was on is captured to its end, one that began while it was off is not captured at all, and numbering continues without
   a gap. (Nothing outside Core can switch it yet: the API and UI are planned.)
+- **Reading what was captured.** `ProxyHost.Exchanges` (an `ExchangeStore`) lists the captured exchanges (paged, filtered by host,
+  method, status, mode or text in the URL), gives one exchange's details with its headers parsed, and opens its request, response and
+  WebSocket log as streams. An exchange is listed once it has finished. `ProxyHost.Events` announces when an exchange starts and
+  finishes (at which point the store can show it), when a WebSocket message passes, and when capture is switched. Only captured
+  exchanges are announced. This is what the planned API and browser UI will read.
 - **Byte-exact for HTTP/1.1**, plain and intercepted: a wire tap under Kestrel (`core/WireTap/`) copies the bytes the client sent
   and the bytes the origin sent, including odd casing, header order and chunk framing. Malformed or abandoned requests that
   Kestrel rejects are captured too.

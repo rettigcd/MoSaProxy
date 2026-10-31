@@ -68,7 +68,7 @@ The API and the UI are separate pieces of work joined by one contract: the JSON 
 Build in this order:
 
 1. **Core exposes exchanges and a live stream.** This is the "Core cleanup" work above, narrowed to what the API needs:
-   - An exchange store: a stable id per exchange (the capture number `N`), summaries for listing, the full record for one
+   - **Built** (`ExchangeStore`, `CaptureEvents`; see capabilities.md). An exchange store: a stable id per exchange (the capture number `N`), summaries for listing, the full record for one
      exchange, and the request and response bytes. The store is the temporary capture folder (`CaptureRun`), so it is always
      there and the UI always works.
    - **A capture switch, on or off while the program runs. Built in Core** (`SwitchableSessionCapture`, `ProxyHost.CaptureEnabled`, `--no-capture`); the API endpoint and UI control are still to do. The point is to turn capture on, run the tests you want, then turn it
@@ -84,8 +84,8 @@ Build in this order:
      - The state belongs to Core, so `Program` and the API only set it. The starting state is open: on, as today, is the
        suggestion, with a command-line option to start with it off.
      - Switching it does not touch what is already captured. Clearing the captured files is a separate action.
-   - An event for "exchange started" and "exchange finished" (so the UI can show a request that is still running), replacing
-     direct console output.
+   - **Built.** Events for "exchange started" and "exchange finished" (so the UI can show a request that is still running), and for
+     WebSocket messages. Replacing Core's direct console output with events is still part of the Core cleanup above.
    - Tests in `test/MoSaProxy.Core.Tests` through the Core types only, with no web server.
 2. **A local API.** A second Kestrel listener (same process, so live data is direct) that exposes the store. The endpoints are
    thin: each calls Core and returns JSON. Starting set:

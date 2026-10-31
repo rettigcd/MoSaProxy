@@ -94,6 +94,12 @@ public sealed class TestProxy : IAsyncDisposable {
 	public int Port => _host.Port;
 	public string? CaptureRunDirectory => _host.CaptureRunDirectory;
 
+	/// <summary>The exchanges captured so far.</summary>
+	public ExchangeStore Exchanges => _host.Exchanges!;
+
+	/// <summary>Announcements about captured exchanges.</summary>
+	public CaptureEvents Events => _host.Events;
+
 	/// <summary>Whether exchanges that begin now are captured; set it to switch capture on or off while the proxy runs.</summary>
 	public bool CaptureEnabled { get => _host.CaptureEnabled; set => _host.CaptureEnabled = value; }
 

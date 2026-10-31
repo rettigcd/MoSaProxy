@@ -23,13 +23,13 @@ A class is placed by its main focus. A line or two of console output inside an o
 
 | Category | Types |
 |---|---|
-| Core | 57 |
+| Core | 66 |
 | UI | 15 |
 | Mix | 0 |
 | Other | 0 |
-| **Total** | **72** (71 declared types, plus the `Program` class the compiler generates) |
+| **Total** | **81** (80 declared types, plus the `Program` class the compiler generates) |
 
-## Core (57)
+## Core (66)
 
 | Type | Kind | File | Why |
 |---|---|---|---|
@@ -61,6 +61,15 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `JsonLinesExchangeLog` | class | `ExchangeLog/JsonLinesExchangeLog.cs` | Writes the JSON Lines log, with rotation. |
 | `CompositeExchangeLog` | class | `ExchangeLog/CompositeExchangeLog.cs` | Sends each record to several logs and reports a failing one. |
 | `FileSessionCapture` | class | `SessionCapture/FileSessionCapture.cs` | Writes into a capture run folder (its own, or one it is given) and numbers the exchanges. |
+| `ExchangeStore` | class | `ExchangeStore/ExchangeStore.cs` | Reads the exchanges captured into a run folder: a filtered, paged list of summaries, one exchange's details, and its request, response and WebSocket-log bytes. It only reads. |
+| `ExchangeSummary` | record | `ExchangeStore/ExchangeSummary.cs` | What a list shows for one captured exchange. |
+| `ExchangeDetail` | record | `ExchangeStore/ExchangeSummary.cs` | Everything known about one captured exchange except its bodies. |
+| `HttpHead` | record | `ExchangeStore/ExchangeSummary.cs` | A captured message's first line and headers, in order. |
+| `ExchangeQuery` | record | `ExchangeStore/ExchangeSummary.cs` | The filters, paging and limit for listing exchanges. |
+| `CaptureEvents` | class | `SessionCapture/CaptureEvents.cs` | What a front end can watch: an exchange started or finished, a WebSocket message passed, capture switched on or off. A handler that throws is ignored. |
+| `WebSocketMessageInfo` | record | `SessionCapture/CaptureEvents.cs` | One WebSocket message as announced by `CaptureEvents`. |
+| `ObservedSessionCapture` | class | `SessionCapture/ObservedSessionCapture.cs` | Wraps a capture and raises `CaptureEvents` as exchanges start and end. |
+| `ObservedSessionCapture.Observed` | nested class | `SessionCapture/ObservedSessionCapture.cs` | The per-exchange wrapper that announces the end of an exchange and its WebSocket messages. |
 | `SwitchableSessionCapture` | class | `SessionCapture/SwitchableSessionCapture.cs` | Capture that can be switched on and off while the proxy runs; an exchange is captured whole or not at all. |
 | `CaptureRun` | class | `SessionCapture/CaptureRun.cs` | A run's temporary capture folder under `%TEMP%\MoSaProxyCaptures`: creates and locks it, deletes the folders of runs that are gone, and deletes its own on dispose. |
 | `FileExchangeCapture` | internal class | `SessionCapture/FileExchangeCapture.cs` | Writes one exchange's capture files: `N_c.txt` (request), `N_s.txt` (response), `N_w.txt` (WebSocket messages) and `N_m.xml` (metadata). |
