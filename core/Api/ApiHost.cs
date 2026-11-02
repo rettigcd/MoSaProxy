@@ -68,6 +68,7 @@ public sealed class ApiHost : IAsyncDisposable {
 			await next();
 		});
 		app.MapOpenApi();
+		MapUi(app);
 		var feed = new ApiEventFeed(proxy.Events);
 		MapEndpoints(app.MapGroup("/api"), proxy, feed, app.Lifetime.ApplicationStopping);
 		await app.StartAsync();
@@ -86,10 +87,38 @@ public sealed class ApiHost : IAsyncDisposable {
 		// A page on another site that calls this API carries its own site as the Origin.
 		if (request.Headers.Origin is { Count: > 0 } origin && !hosts.Select(h => "http://" + h).Contains(origin.ToString(), StringComparer.OrdinalIgnoreCase))
 			return StatusCodes.Status403Forbidden;
+		// The UI's script and style are public: they hold nothing private, and a <script src> cannot carry the token.
+		if (HttpMethods.IsGet(request.Method) && UiPublicFiles.Contains(request.Path.Value ?? "")) return null;
 		string given = request.Headers[TokenHeader].FirstOrDefault() ?? request.Query["token"].FirstOrDefault() ?? "";
 		// Compared in constant time, so the token cannot be found out a character at a time.
 		if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(given), _token)) return StatusCodes.Status401Unauthorized;
 		return null;
+	}
+
+	static readonly string[] UiPublicFiles = ["/app.js", "/app.css"];
+
+	/// <summary>
+	/// Serves the browser UI: the few files embedded in the assembly, each at its own path and nothing else, so no request can reach
+	/// anything on disk. The page shows captured traffic, so it is locked down: it may load only its own script and style.
+	/// </summary>
+	static void MapUi(WebApplication app) {
+		void Serve(string path, string resource, string contentType) {
+			using var stream = typeof(ApiHost).Assembly.GetManifestResourceStream("ui/" + resource) ?? throw new InvalidOperationException("The UI file is missing from the assembly: " + resource);
+			var content = new MemoryStream();
+			stream.CopyTo(content);
+			byte[] bytes = content.ToArray();
+			app.MapGet(path, (HttpContext context) => {
+					var headers = context.Response.Headers;
+					headers.CacheControl = "no-store";
+					headers["X-Content-Type-Options"] = "nosniff";
+					headers["Content-Security-Policy"] = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+					return Results.Bytes(bytes, contentType);
+				})
+				.ExcludeFromDescription();
+		}
+		Serve("/", "index.html", "text/html; charset=utf-8");
+		Serve("/app.js", "app.js", "text/javascript; charset=utf-8");
+		Serve("/app.css", "app.css", "text/css; charset=utf-8");
 	}
 
 	static void MapEndpoints(RouteGroupBuilder api, ProxyHost proxy, ApiEventFeed feed, CancellationToken stopping) {

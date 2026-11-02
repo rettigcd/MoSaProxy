@@ -13,6 +13,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The browser UI: static files served by the local API from inside the assembly, so nothing on disk is ever served. -->
+    <EmbeddedResource Include="Api\ui\*" LogicalName="ui/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="MoSaProxy.Core.Tests" />
   </ItemGroup>
 

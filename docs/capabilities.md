@@ -108,8 +108,14 @@ the program on a free port (`--api-port N` chooses one, `--no-api` turns it off)
 token: `Local API: http://127.0.0.1:PORT/?token=...`. Every endpoint is documented in [api/endpoints.md](api/endpoints.md), generated
 from the API's own OpenAPI description, which is [api/openapi.json](api/openapi.json) and is also served at `/openapi/v1.json`.
 
-- **So far:** `GET /api/status`, `GET` and `PUT /api/capture`, `GET /api/exchanges` (paged, filtered) and `GET /api/exchanges/{id}`.
-  The byte and body endpoints, the event stream, the `.saz` download and stop come next (see [plan.md](plan.md)).
+- **Endpoints:** status, the capture switch, the exchange list (paged, filtered) and detail, the captured request and response bytes,
+  their bodies (optionally with chunking and gzip, deflate or brotli removed), the WebSocket log, a live event stream
+  (Server-Sent Events that resume from `Last-Event-ID`), the `.saz` download (all or chosen exchanges) and stop.
+- **Browser UI.** The same listener serves a small page at the printed address: a live table of exchanges, a detail pane (overview,
+  request, response, WebSocket log; JSON is pretty-printed and images shown), a filter, the capture on/off switch, *Save .saz* and
+  *Stop proxy*. Its three files (`core/Api/ui/`) are compiled into the assembly and served at their own paths only, so nothing on
+  disk can be reached. The page may load only its own script and style (Content-Security-Policy), and shows captured text only as
+  text. The script and style are served without the token (a `<script src>` cannot carry one); the page itself needs it.
 - **Safety.** The API shows credentials and cookies, and a page on another site could try to call a local server, so every request
   is checked: the `Host` header must name the listener (403 otherwise, against DNS rebinding), an `Origin` header must be the
   listener's own (403), and the token must be given in the `X-MoSaProxy-Token` header or a `token` query parameter (401). The token

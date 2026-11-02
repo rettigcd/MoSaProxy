@@ -142,7 +142,7 @@ Build in this order:
      `Origin` other than the UI's own, and require a per-run token that the console prints in the UI's address.
    - Tests: request each endpoint through the real listener with the fake origin, including paging, filters, the stream
      (events arrive, and `Last-Event-ID` resumes) and each rejection above.
-3. **A minimal UI.** Static HTML and JavaScript served by the same listener, with no build step: a table of exchanges fed by
+3. **A minimal UI.** *(built; see [capabilities.md](capabilities.md). Still to do: look at it in Chrome by hand, and grow it.)* Static HTML and JavaScript served by the same listener, with no build step: a table of exchanges fed by
    `/api/stream`, and a detail pane showing the request, response, headers and body of the selected row. During development it can
    run against canned JSON files before the endpoints exist. Checked by hand in Chrome; add a test that the listener serves the
    page and nothing outside the UI folder.

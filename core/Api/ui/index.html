@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoSaProxy</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <h1>MoSaProxy</h1>
+  <button id="capture" type="button" title="Turn capture on or off">Capture: …</button>
+  <input id="filter" type="search" placeholder="Filter by URL text" aria-label="Filter by URL text">
+  <span id="count" class="muted"></span>
+  <span class="spacer"></span>
+  <span id="live" class="muted" title="Connection to the live event stream">connecting…</span>
+  <a id="export" href="#" title="Download everything captured as a .saz archive">Save .saz</a>
+  <button id="stop" type="button" title="Stop the proxy">Stop proxy</button>
+</header>
+<main>
+  <section id="list">
+    <table>
+      <thead><tr><th>#</th><th>Time</th><th>Method</th><th>Host</th><th>Path</th><th>Status</th><th>Size</th><th>Time (ms)</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p id="empty" class="muted">Nothing captured yet. Send traffic through the proxy.</p>
+  </section>
+  <section id="detail" hidden>
+    <nav id="tabs" role="tablist"></nav>
+    <div id="pane"></div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
