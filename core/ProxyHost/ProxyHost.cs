@@ -33,6 +33,9 @@ public sealed class ProxyHost : IAsyncDisposable {
 		Authority = authority;
 	}
 
+	/// <summary>The settings this host was started with.</summary>
+	public ProxyOptions Options { get; private set; } = new();
+
 	/// <summary>The port actually bound (useful when the options asked for port 0).</summary>
 	public int Port { get; }
 
@@ -94,7 +97,11 @@ public sealed class ProxyHost : IAsyncDisposable {
 		var switchable = new SwitchableSessionCapture(new ObservedSessionCapture(capture, events), options.CaptureEnabled);
 		// Exact wire bytes are only recorded when something keeps them.
 		bool tapWire = capture is not NullSessionCapture;
-		try { return await StartListeningAsync(options, log, switchable, events, tapWire, limits, runDirectory, captureRun); }
+		try {
+			var host = await StartListeningAsync(options, log, switchable, events, tapWire, limits, runDirectory, captureRun);
+			host.Options = options;
+			return host;
+		}
 		catch { captureRun?.Dispose(); throw; }
 	}
 

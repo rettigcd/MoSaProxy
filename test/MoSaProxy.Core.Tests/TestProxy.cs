@@ -83,6 +83,9 @@ public sealed class TestProxy : IAsyncDisposable {
 	/// <summary>Thumbprints of extra certificates this client accepts (for example a test origin's own self-signed certificate).</summary>
 	public HashSet<string> AlsoTrust { get; } = new();
 
+	/// <summary>The host under test, for the API to sit on.</summary>
+	public ProxyHost Host => _host;
+
 	public CertificateAuthority? Authority => _host.Authority;
 
 	public MemoryExchangeLog Log { get; }

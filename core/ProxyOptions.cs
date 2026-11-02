@@ -82,6 +82,12 @@ public sealed class ProxyOptions {
 	/// <summary>If set, the run's capture is also written to this Fiddler .saz file when the proxy stops, before the capture folder is deleted.</summary>
 	public string? SazPath { get; init; }
 
+	/// <summary>Whether to start the local API (see <see cref="ApiHost"/>) that the browser UI reads from. On by default.</summary>
+	public bool ApiEnabled { get; init; } = true;
+
+	/// <summary>The loopback port of the local API; 0 picks a free port.</summary>
+	public int ApiPort { get; init; }
+
 	/// <summary>Start a browser that uses the proxy once it is listening.</summary>
 	public bool OpenBrowser { get; init; }
 

@@ -45,6 +45,8 @@ public class ProxyOptionsParser_Tests {
 	[InlineData("--port")]
 	[InlineData("--log")]
 	[InlineData("--no-capture")]
+	[InlineData("--api-port")]
+	[InlineData("--no-api")]
 	[InlineData("--capture-max-body")]
 	[InlineData("--connect-timeout")]
 	[InlineData("--intercept")]
@@ -200,6 +202,54 @@ public class ProxyOptionsParser_Tests {
 		// Then: capture starts off only when asked
 		withFlag.CaptureEnabled.ShouldBeFalse();
 		without.CaptureEnabled.ShouldBeTrue();
+	}
+
+	[Fact]
+	public void Parse_NoApiArguments_StartsTheApiOnAFreePort() {
+
+		// Given: no command-line arguments
+		var args = Array.Empty<string>();
+
+		// When: the options are parsed
+		var options = ProxyOptionsParser.Parse(args);
+
+		// Then: the local API is on, and its port is 0 (any free port)
+		options.ApiEnabled.ShouldBeTrue();
+		options.ApiPort.ShouldBe(0);
+	}
+
+	[Fact]
+	public void Parse_ApiPortAndNoApi_AreApplied() {
+
+		// Given: arguments choosing the API port, and arguments turning the API off
+		var port = new[] { "--api-port", "9090" };
+		var off = new[] { "--no-api" };
+
+		// When: both are parsed
+		var withPort = ProxyOptionsParser.Parse(port);
+		var withoutApi = ProxyOptionsParser.Parse(off);
+
+		// Then: the port is carried, and the API is off only when asked
+		withPort.ApiPort.ShouldBe(9090);
+		withPort.ApiEnabled.ShouldBeTrue();
+		withoutApi.ApiEnabled.ShouldBeFalse();
+	}
+
+	[Theory]
+	[InlineData("--api-port")]
+	[InlineData("--api-port", "abc")]
+	[InlineData("--api-port", "70000")]
+	[InlineData("--api-port", "-1")]
+	public void Parse_InvalidApiPort_Throws(params string[] args) {
+
+		// Given: an --api-port that is missing, not a number, or out of range
+		// (supplied by the test data)
+
+		// When: the options are parsed
+		var parse = () => ProxyOptionsParser.Parse(args);
+
+		// Then: parsing fails with an ArgumentException
+		Should.Throw<ArgumentException>(parse);
 	}
 
 	[Fact]

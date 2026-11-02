@@ -23,13 +23,13 @@ A class is placed by its main focus. A line or two of console output inside an o
 
 | Category | Types |
 |---|---|
-| Core | 66 |
+| Core | 71 |
 | UI | 15 |
 | Mix | 0 |
 | Other | 0 |
-| **Total** | **81** (80 declared types, plus the `Program` class the compiler generates) |
+| **Total** | **86** (85 declared types, plus the `Program` class the compiler generates) |
 
-## Core (66)
+## Core (71)
 
 | Type | Kind | File | Why |
 |---|---|---|---|
@@ -61,6 +61,11 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `JsonLinesExchangeLog` | class | `ExchangeLog/JsonLinesExchangeLog.cs` | Writes the JSON Lines log, with rotation. |
 | `CompositeExchangeLog` | class | `ExchangeLog/CompositeExchangeLog.cs` | Sends each record to several logs and reports a failing one. |
 | `FileSessionCapture` | class | `SessionCapture/FileSessionCapture.cs` | Writes into a capture run folder (its own, or one it is given) and numbers the exchanges. |
+| `ApiHost` | class | `Api/ApiHost.cs` | The local API: a second loopback Kestrel listener over a `ProxyHost` that serves the captured exchanges, the capture switch and its own OpenAPI description, behind Host, Origin and token checks. It has no console code. |
+| `ApiStatus` | record | `Api/ApiModels.cs` | The answer of `GET /api/status`. |
+| `ApiCaptureState` | record | `Api/ApiModels.cs` | The answer of the capture endpoints. |
+| `ApiCaptureRequest` | record | `Api/ApiModels.cs` | The body of `PUT /api/capture`. |
+| `ApiExchangePage` | record | `Api/ApiModels.cs` | One page of the exchange list, with the number to ask for the next page. |
 | `ExchangeStore` | class | `ExchangeStore/ExchangeStore.cs` | Reads the exchanges captured into a run folder: a filtered, paged list of summaries, one exchange's details, and its request, response and WebSocket-log bytes. It only reads. |
 | `ExchangeSummary` | record | `ExchangeStore/ExchangeSummary.cs` | What a list shows for one captured exchange. |
 | `ExchangeDetail` | record | `ExchangeStore/ExchangeSummary.cs` | Everything known about one captured exchange except its bodies. |

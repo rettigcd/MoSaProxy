@@ -41,11 +41,21 @@ var limitReporter = new ResourceLimitConsoleReporter(limits, console);   // prin
 var log = new CompositeExchangeLog(sinks.ToArray(), ex => limits.Report("writing the log", ex));
 
 var proxy = await ProxyHost.StartAsync(options, log, limits: limits);
+ApiHost? api = null;
 StopResult result;
 try {
 	console.WriteLine($"HTTP proxy listening on 127.0.0.1:{proxy.Port}. Press Ctrl+C to stop.");
 	if (options.SazPath is null) console.WriteLine("Sessions are captured to a temporary folder that is deleted when the program exits. Use --saz FILE to keep them.");
 	else console.WriteLine($"Sessions are captured to a temporary folder that is deleted when the program exits; they will be saved to {Path.GetFullPath(options.SazPath)}.");
+	if (options.ApiEnabled) {
+		try {
+			api = await ApiHost.StartAsync(proxy, options.ApiPort);
+			console.WriteLine($"Local API: {api.Url}");
+		}
+		catch (Exception ex) {
+			console.WriteLine($"{Fg.Red}Could not start the local API:{Fg.Restore} {ex.Message}");
+		}
+	}
 	bool rootTrusted = false;
 	if (proxy.Authority is { } authority) {
 		bool interactive = OperatingSystem.IsWindows() && !Console.IsInputRedirected;
@@ -87,6 +97,7 @@ try {
 		TryExportSaz(runDirectory, options.SazPath);
 }
 finally {
+	if (api is not null) await api.DisposeAsync();
 	await proxy.DisposeAsync();
 }
 if (proxy.CaptureCleanupError is { } cleanupError)

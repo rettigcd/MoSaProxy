@@ -10,7 +10,7 @@ public static class ProxyOptionsParser {
 
 	/// <summary>Shown after an unknown argument.</summary>
 	public const string Usage =
-		"Usage: MoSaProxy [--port N] [--log FILE] [--no-capture] [--capture-max-body BYTES] [--connect-timeout SECONDS] [--intercept] " +
+		"Usage: MoSaProxy [--port N] [--log FILE] [--no-capture] [--capture-max-body BYTES] [--api-port N] [--no-api] [--connect-timeout SECONDS] [--intercept] " +
 		"[--intercept-bypass HOSTS] [--ca-dir DIR] [--untrust-ca] [--no-http2] [--saz FILE] [--open [URL]] [--log-max-mb N] " +
 		"[--log-keep N] [--drain-timeout SECONDS]";
 
@@ -21,6 +21,8 @@ public static class ProxyOptionsParser {
 		string? logPath = defaults.LogPath;
 		long? captureMaxBody = defaults.CaptureMaxBodyBytes;
 		bool captureEnabled = defaults.CaptureEnabled;
+		int apiPort = defaults.ApiPort;
+		bool apiEnabled = defaults.ApiEnabled;
 		var connectTimeout = defaults.ConnectTimeout;
 		bool intercept = defaults.Intercept;
 		var bypass = new List<string>(defaults.InterceptBypass);
@@ -43,6 +45,13 @@ public static class ProxyOptionsParser {
 				case "--log":
 					if (i + 1 >= args.Length) throw new ArgumentException("--log requires a file path.");
 					logPath = args[++i];
+					break;
+				case "--api-port":
+					if (i + 1 >= args.Length || !int.TryParse(args[++i], out apiPort) || apiPort < 0 || apiPort > 65535)
+						throw new ArgumentException("--api-port requires a number from 0 to 65535 (0 picks a free port).");
+					break;
+				case "--no-api":
+					apiEnabled = false;
 					break;
 				case "--no-capture":
 					captureEnabled = false;
@@ -104,7 +113,7 @@ public static class ProxyOptionsParser {
 		if (bypass.Count > 0 && !intercept) throw new ArgumentException("--intercept-bypass only makes sense together with --intercept.");
 
 		return new ProxyOptions {
-			Port = port, LogPath = logPath, CaptureMaxBodyBytes = captureMaxBody, CaptureEnabled = captureEnabled,
+			Port = port, LogPath = logPath, CaptureMaxBodyBytes = captureMaxBody, CaptureEnabled = captureEnabled, ApiEnabled = apiEnabled, ApiPort = apiPort,
 			ConnectTimeout = connectTimeout, Intercept = intercept, InterceptBypass = bypass, CaDirectory = caDirectory, UntrustCa = untrustCa, EnableHttp2 = http2,
 			SazPath = sazPath, OpenBrowser = openBrowser, OpenUrl = openUrl,
 			LogMaxBytes = logMaxBytes, LogKeep = logKeep, DrainTimeout = drainTimeout,

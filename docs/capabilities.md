@@ -101,6 +101,22 @@ so that it is complete and before the temporary folder is deleted. There is no o
 Fiddler opens the result. What is written, how it differs from a file Fiddler wrote, and what Fiddler's loader accepts are in
 [saz-export.md](saz-export.md); the format itself is in [specs/saz-format.md](specs/saz-format.md).
 
+## Local API
+
+A second loopback listener (`ApiHost`) lets a front end read what the proxy captured and switch capture on and off. It starts with
+the program on a free port (`--api-port N` chooses one, `--no-api` turns it off) and the console prints its address with the per-run
+token: `Local API: http://127.0.0.1:PORT/?token=...`. Every endpoint is documented in [api/endpoints.md](api/endpoints.md), generated
+from the API's own OpenAPI description, which is [api/openapi.json](api/openapi.json) and is also served at `/openapi/v1.json`.
+
+- **So far:** `GET /api/status`, `GET` and `PUT /api/capture`, `GET /api/exchanges` (paged, filtered) and `GET /api/exchanges/{id}`.
+  The byte and body endpoints, the event stream, the `.saz` download and stop come next (see [plan.md](plan.md)).
+- **Safety.** The API shows credentials and cookies, and a page on another site could try to call a local server, so every request
+  is checked: the `Host` header must name the listener (403 otherwise, against DNS rebinding), an `Origin` header must be the
+  listener's own (403), and the token must be given in the `X-MoSaProxy-Token` header or a `token` query parameter (401). The token
+  is compared in constant time.
+- **The documents cannot drift.** A test fetches the description from the real listener and fails if `api/openapi.json` or
+  `api/endpoints.md` no longer matches; running the tests with `MOSAPROXY_UPDATE_API_DOCS=1` rewrites them.
+
 ## Running and stopping
 
 - `dotnet run --project app -- [options]`; the default port is 8080 (`--port N`). `--connect-timeout SECONDS` (default 15).
