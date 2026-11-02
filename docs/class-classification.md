@@ -23,11 +23,11 @@ A class is placed by its main focus. A line or two of console output inside an o
 
 | Category | Types |
 |---|---|
-| Core | 73 |
+| Core | 75 |
 | UI | 15 |
 | Mix | 0 |
 | Other | 0 |
-| **Total** | **88** (87 declared types, plus the `Program` class the compiler generates) |
+| **Total** | **90** (89 declared types, plus the `Program` class the compiler generates) |
 
 ## Core (71)
 
@@ -69,6 +69,8 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `ExchangeStore` | class | `ExchangeStore/ExchangeStore.cs` | Reads the exchanges captured into a run folder: a filtered, paged list of summaries, one exchange's details, and its request, response and WebSocket-log bytes. It only reads. |
 | `ExchangeSummary` | record | `ExchangeStore/ExchangeSummary.cs` | What a list shows for one captured exchange. |
 | `ExchangeDetail` | record | `ExchangeStore/ExchangeSummary.cs` | Everything known about one captured exchange except its bodies. |
+| `ApiEventFeed` | class | `Api/ApiEventFeed.cs` | Remembers the latest capture events, numbered, so the event stream can serve many readers and let one that reconnects catch up. |
+| `ApiEvent` | record | `Api/ApiEventFeed.cs` | One numbered event: id, name and JSON data. |
 | `HttpBody` | static class | `ExchangeStore/HttpBody.cs` | Splits a captured message into head and body and, on request, removes chunk framing and gzip, deflate or brotli coding. |
 | `BodyContent` | record | `ExchangeStore/HttpBody.cs` | A body taken from a captured message, with its content type and whether it was decoded. |
 | `HttpHead` | record | `ExchangeStore/ExchangeSummary.cs` | A captured message's first line and headers, in order. |

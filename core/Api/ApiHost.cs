@@ -18,12 +18,15 @@ namespace MoSaProxy;
 public sealed class ApiHost : IAsyncDisposable {
 	public const string TokenHeader = "X-MoSaProxy-Token";
 	const int DefaultPageSize = 100, MaxPageSize = 1000;
+	static readonly TimeSpan KeepAlive = TimeSpan.FromSeconds(15);
 
 	readonly WebApplication _app;
 	readonly byte[] _token;
+	readonly ApiEventFeed _feed;
 
-	ApiHost(WebApplication app, int port, string token) {
+	ApiHost(WebApplication app, int port, string token, ApiEventFeed feed) {
 		_app = app;
+		_feed = feed;
 		Port = port;
 		Token = token;
 		_token = Encoding.UTF8.GetBytes(token);
@@ -65,11 +68,12 @@ public sealed class ApiHost : IAsyncDisposable {
 			await next();
 		});
 		app.MapOpenApi();
-		MapEndpoints(app.MapGroup("/api"), proxy);
+		var feed = new ApiEventFeed(proxy.Events);
+		MapEndpoints(app.MapGroup("/api"), proxy, feed, app.Lifetime.ApplicationStopping);
 		await app.StartAsync();
 
 		int boundPort = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First()).Port;
-		host = new ApiHost(app, boundPort, token);
+		host = new ApiHost(app, boundPort, token, feed);
 		return host;
 	}
 
@@ -88,7 +92,7 @@ public sealed class ApiHost : IAsyncDisposable {
 		return null;
 	}
 
-	static void MapEndpoints(RouteGroupBuilder api, ProxyHost proxy) {
+	static void MapEndpoints(RouteGroupBuilder api, ProxyHost proxy, ApiEventFeed feed, CancellationToken stopping) {
 		api.MapGet("/status", () => new ApiStatus(
 				typeof(ApiHost).Assembly.GetName().Version?.ToString(3) ?? "0.0.0", proxy.Port, proxy.Options.Intercept, proxy.Options.EnableHttp2,
 				proxy.CaptureEnabled, proxy.Exchanges?.Count ?? 0, proxy.CaptureRunDirectory, proxy.Options.LogPath))
@@ -149,6 +153,44 @@ public sealed class ApiHost : IAsyncDisposable {
 			.Produces<string>(StatusCodes.Status200OK, "text/plain").ProducesProblem(StatusCodes.Status404NotFound)
 			.WithTags("Exchanges").WithName("GetWebSocketLog").WithSummary("The log of a WebSocket exchange's messages")
 			.WithDescription("The readable log the proxy wrote for the messages sent each way. Only exchanges whose detail says a WebSocket log exists have one.");
+
+		api.MapGet("/stream", (HttpContext context, CancellationToken _) => StreamEvents(context, feed, stopping))
+			.Produces(StatusCodes.Status200OK, contentType: "text/event-stream")
+			.WithTags("Stream").WithName("StreamEvents").WithSummary("Live events as exchanges are captured")
+			.WithDescription("Server-Sent Events, kept open. Each event has an id that only grows, a name and JSON data. Events: exchange-started {id}; exchange-finished {id} (the exchange can now be read); websocket-message {exchange, fromClient, type, totalBytes}; capture {enabled}; reset {} (sent when the events asked for after Last-Event-ID are no longer remembered: fetch the exchange list again). A connection with no Last-Event-ID (header, or the lastEventId query parameter) gets only what happens from then on; one with it first gets the events it missed. A comment line is sent every 15 seconds to keep the connection alive. A browser's EventSource cannot set headers, so pass the token as the token query parameter.");
+	}
+
+	static async Task StreamEvents(HttpContext context, ApiEventFeed feed, CancellationToken stopping) {
+		using var cancel = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stopping);
+		var token = cancel.Token;
+		var response = context.Response;
+		response.ContentType = "text/event-stream";
+		response.Headers.CacheControl = "no-cache";
+		string? given = context.Request.Headers["Last-Event-ID"].FirstOrDefault() ?? context.Request.Query["lastEventId"].FirstOrDefault();
+		long last = long.TryParse(given, out long id) && id >= 0 ? id : feed.Last;
+		try {
+			await response.WriteAsync(": connected\n\n", token);
+			await response.Body.FlushAsync(token);
+			while (!token.IsCancellationRequested) {
+				var (events, missed, next) = feed.After(last);
+				var text = new StringBuilder();
+				if (missed) text.Append("event: reset\ndata: {}\n\n");
+				foreach (var e in events) {
+					text.Append($"id: {e.Id}\nevent: {e.Name}\ndata: {e.Json}\n\n");
+					last = e.Id;
+				}
+				if (text.Length > 0) {
+					await response.WriteAsync(text.ToString(), token);
+					await response.Body.FlushAsync(token);
+				}
+				if (events.Count > 0) continue;       // (more may have arrived while writing)
+				if (await Task.WhenAny(next, Task.Delay(KeepAlive, token)) != next) {
+					await response.WriteAsync(": keep-alive\n\n", token);
+					await response.Body.FlushAsync(token);
+				}
+			}
+		}
+		catch (OperationCanceledException) { }       // the reader left, or the API is stopping
 	}
 
 	static IResult BodyResult(ProxyHost proxy, int id, bool response, bool decode, HttpContext context) {
@@ -162,6 +204,7 @@ public sealed class ApiHost : IAsyncDisposable {
 		TypedResults.NotFound(new ProblemDetails { Title = "No such " + what, Detail = $"There is no finished captured exchange number {id} with {what}.", Status = StatusCodes.Status404NotFound });
 
 	public async ValueTask DisposeAsync() {
+		_feed.Dispose();
 		await _app.StopAsync();
 		await _app.DisposeAsync();
 	}

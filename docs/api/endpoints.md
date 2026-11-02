@@ -154,6 +154,18 @@ The readable log the proxy wrote for the messages sent each way. Only exchanges 
 | 200 OK | `text/plain` string |
 | 404 Not Found | `application/problem+json` ProblemDetails |
 
+## Stream
+
+### `GET /api/stream`
+
+**Live events as exchanges are captured** (`StreamEvents`)
+
+Server-Sent Events, kept open. Each event has an id that only grows, a name and JSON data. Events: exchange-started {id}; exchange-finished {id} (the exchange can now be read); websocket-message {exchange, fromClient, type, totalBytes}; capture {enabled}; reset {} (sent when the events asked for after Last-Event-ID are no longer remembered: fetch the exchange list again). A connection with no Last-Event-ID (header, or the lastEventId query parameter) gets only what happens from then on; one with it first gets the events it missed. A comment line is sent every 15 seconds to keep the connection alive. A browser's EventSource cannot set headers, so pass the token as the token query parameter.
+
+| Response | Content |
+|---|---|
+| 200 OK |  |
+
 ## Models
 
 ### ApiCaptureRequest
