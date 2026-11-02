@@ -258,6 +258,124 @@ public class Api_Tests {
 		detail.RequestSource.ShouldBe(CaptureSource.Wire);
 	}
 
+	// ---- bytes and bodies -----------------------------------------------------------------------------------------------------
+
+	[Fact]
+	public async Task GetRequestAndResponseBytes_ReturnTheCapturedMessages() {
+
+		// Given: one captured request
+		await using var origin = await StartOriginAsync();
+		await using var api = await TestApi.StartAsync();
+		await api.CaptureOneAsync(origin, "/page", 1);
+
+		// When: the request and response bytes are read
+		string request = await api.Client.GetStringAsync("api/exchanges/1/request");
+		var response = await api.Client.GetAsync("api/exchanges/1/response");
+		string responseText = await response.Content.ReadAsStringAsync();
+
+		// Then: they are the heads and bodies as captured, served as raw bytes
+		request.ShouldStartWith($"GET {origin.UrlFor("/page")} HTTP/1.1\r\n");
+		responseText.ShouldStartWith("HTTP/1.1 200 OK\r\n");
+		responseText.ShouldContain("body of /page");
+		response.Content.Headers.ContentType!.MediaType.ShouldBe("application/octet-stream");
+	}
+
+	[Fact]
+	public async Task GetResponseBody_ReturnsJustTheBodyWithTheOriginsContentType() {
+
+		// Given: an origin that answers with a typed body
+		await using var origin = await TestOrigin.StartAsync(async c => {
+			c.Response.ContentType = "text/x-test";
+			c.Response.ContentLength = 13;
+			await c.Response.WriteAsync("just the body");
+		});
+		await using var api = await TestApi.StartAsync();
+		await api.CaptureOneAsync(origin, "/typed", 1);
+
+		// When: the response body is read
+		var response = await api.Client.GetAsync("api/exchanges/1/response/body");
+
+		// Then: it is only the body, with the origin's content type
+		(await response.Content.ReadAsStringAsync()).ShouldBe("just the body");
+		response.Content.Headers.ContentType!.MediaType.ShouldBe("text/x-test");
+	}
+
+	[Fact]
+	public async Task GetResponseBody_OfAGzipResponse_ReturnsItAsCapturedUnlessDecodeIsAskedFor() {
+
+		// Given: an origin that answers with a gzipped body
+		await using var origin = await TestOrigin.StartAsync(async c => {
+			var zipped = new MemoryStream();
+			using (var gzip = new System.IO.Compression.GZipStream(zipped, System.IO.Compression.CompressionMode.Compress, leaveOpen: true)) gzip.Write("squeezed text"u8);
+			c.Response.Headers.ContentEncoding = "gzip";
+			c.Response.ContentType = "text/plain";
+			c.Response.ContentLength = zipped.Length;
+			await c.Response.Body.WriteAsync(zipped.ToArray());
+		});
+		await using var api = await TestApi.StartAsync();
+		await api.CaptureOneAsync(origin, "/zipped", 1);
+
+		// When: the body is read as captured, and again with decode=true
+		var raw = await api.Client.GetByteArrayAsync("api/exchanges/1/response/body");
+		var decoded = await api.Client.GetAsync("api/exchanges/1/response/body?decode=true");
+
+		// Then: the first is gzip, the second is the text and says it was decoded
+		raw.Take(2).ShouldBe(new byte[] { 0x1f, 0x8b });
+		(await decoded.Content.ReadAsStringAsync()).ShouldBe("squeezed text");
+		decoded.Headers.GetValues("X-MoSaProxy-Decoded").ShouldBe(new[] { "true" });
+	}
+
+	[Fact]
+	public async Task GetRequestBody_OfAPost_ReturnsWhatWasSent() {
+
+		// Given: a POST with a body, captured
+		await using var origin = await StartOriginAsync();
+		await using var api = await TestApi.StartAsync();
+		await api.Proxy.Client.PostAsync(origin.UrlFor("/submit"), new StringContent("name=value", System.Text.Encoding.UTF8, "application/x-www-form-urlencoded"));
+		var deadline = DateTime.UtcNow.AddSeconds(5);
+		while (api.Proxy.Exchanges.Count < 1 && DateTime.UtcNow < deadline) await Task.Delay(10);
+
+		// When: the request body is read
+		var response = await api.Client.GetAsync("api/exchanges/1/request/body");
+
+		// Then: it is the form that was posted
+		(await response.Content.ReadAsStringAsync()).ShouldBe("name=value");
+		response.Content.Headers.ContentType!.MediaType.ShouldBe("application/x-www-form-urlencoded");
+	}
+
+	[Theory]
+	[InlineData("api/exchanges/99/request")]
+	[InlineData("api/exchanges/99/response")]
+	[InlineData("api/exchanges/99/request/body")]
+	[InlineData("api/exchanges/99/response/body")]
+	[InlineData("api/exchanges/99/websocket")]
+	public async Task GetBytesOrBody_OfAnExchangeThatDoesNotExist_Answers404(string url) {
+
+		// Given: the API running with nothing captured
+		await using var api = await TestApi.StartAsync();
+
+		// When: bytes of exchange 99 are asked for
+		var response = await api.Client.GetAsync(url);
+
+		// Then: the answer is 404
+		response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+	}
+
+	[Fact]
+	public async Task GetWebSocketLog_OfAPlainExchange_Answers404() {
+
+		// Given: a captured ordinary request (no WebSocket)
+		await using var origin = await StartOriginAsync();
+		await using var api = await TestApi.StartAsync();
+		await api.CaptureOneAsync(origin, "/page", 1);
+
+		// When: its WebSocket log is asked for
+		var response = await api.Client.GetAsync("api/exchanges/1/websocket");
+
+		// Then: there is none
+		response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+	}
+
 	[Fact]
 	public async Task GetExchange_ThatDoesNotExist_Answers404WithAProblemDescription() {
 

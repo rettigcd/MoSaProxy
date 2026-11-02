@@ -121,7 +121,45 @@ public sealed class ApiHost : IAsyncDisposable {
 					: TypedResults.NotFound(new ProblemDetails { Title = "No such exchange", Detail = $"There is no finished captured exchange number {id}.", Status = StatusCodes.Status404NotFound }))
 			.WithTags("Exchanges").WithName("GetExchange").WithSummary("One captured exchange")
 			.WithDescription("The summary, the request and response heads with their headers in the order captured, timings, where the captured bytes came from, and whether a WebSocket log exists.");
+
+		api.MapGet("/exchanges/{id:int}/request",(int id) =>
+				proxy.Exchanges?.OpenRequest(id) is { } stream ? TypedResults.Stream(stream, "application/octet-stream") : NoSuchExchange(id, "a request"))
+			.Produces<byte[]>(StatusCodes.Status200OK, "application/octet-stream").ProducesProblem(StatusCodes.Status404NotFound)
+			.WithTags("Exchanges").WithName("GetRequestBytes").WithSummary("The request exactly as captured")
+			.WithDescription("The request head and body as the bytes captured, including any chunk framing and content coding. For a CONNECT it is whatever followed the request.");
+
+		api.MapGet("/exchanges/{id:int}/response", (int id) =>
+				proxy.Exchanges?.OpenResponse(id) is { } stream ? TypedResults.Stream(stream, "application/octet-stream") : NoSuchExchange(id, "a response"))
+			.Produces<byte[]>(StatusCodes.Status200OK, "application/octet-stream").ProducesProblem(StatusCodes.Status404NotFound)
+			.WithTags("Exchanges").WithName("GetResponseBytes").WithSummary("The response exactly as captured")
+			.WithDescription("The response head and body as the bytes captured, including any chunk framing and content coding.");
+
+		api.MapGet("/exchanges/{id:int}/request/body", (int id, bool? decode, HttpContext context) => BodyResult(proxy, id, response: false, decode == true, context))
+			.Produces<byte[]>(StatusCodes.Status200OK, "application/octet-stream").ProducesProblem(StatusCodes.Status404NotFound)
+			.WithTags("Exchanges").WithName("GetRequestBody").WithSummary("The request body")
+			.WithDescription("Just the body, served with the request's own Content-Type. With decode=true the chunk framing and any gzip, deflate or brotli coding are removed, and the X-MoSaProxy-Decoded response header says whether that worked (it stays false for a coding that is not known or a body that is damaged, and the body is then as captured).");
+
+		api.MapGet("/exchanges/{id:int}/response/body", (int id, bool? decode, HttpContext context) => BodyResult(proxy, id, response: true, decode == true, context))
+			.Produces<byte[]>(StatusCodes.Status200OK, "application/octet-stream").ProducesProblem(StatusCodes.Status404NotFound)
+			.WithTags("Exchanges").WithName("GetResponseBody").WithSummary("The response body")
+			.WithDescription("Just the body, served with the response's own Content-Type. With decode=true the chunk framing and any gzip, deflate or brotli coding are removed, and the X-MoSaProxy-Decoded response header says whether that worked (it stays false for a coding that is not known or a body that is damaged, and the body is then as captured).");
+
+		api.MapGet("/exchanges/{id:int}/websocket", (int id) =>
+				proxy.Exchanges?.OpenWebSocketLog(id) is { } stream ? TypedResults.Stream(stream, "text/plain; charset=utf-8") : NoSuchExchange(id, "a WebSocket log"))
+			.Produces<string>(StatusCodes.Status200OK, "text/plain").ProducesProblem(StatusCodes.Status404NotFound)
+			.WithTags("Exchanges").WithName("GetWebSocketLog").WithSummary("The log of a WebSocket exchange's messages")
+			.WithDescription("The readable log the proxy wrote for the messages sent each way. Only exchanges whose detail says a WebSocket log exists have one.");
 	}
+
+	static IResult BodyResult(ProxyHost proxy, int id, bool response, bool decode, HttpContext context) {
+		if (proxy.Exchanges?.Body(id, response, decode) is not { } body) return NoSuchExchange(id, response ? "a response" : "a request");
+		if (decode) context.Response.Headers["X-MoSaProxy-Decoded"] = body.Decoded ? "true" : "false";
+		string type = body.ContentType is { } t && System.Net.Http.Headers.MediaTypeHeaderValue.TryParse(t, out _) ? t : "application/octet-stream";
+		return TypedResults.Bytes(body.Bytes, type);
+	}
+
+	static IResult NoSuchExchange(int id, string what) =>
+		TypedResults.NotFound(new ProblemDetails { Title = "No such " + what, Detail = $"There is no finished captured exchange number {id} with {what}.", Status = StatusCodes.Status404NotFound });
 
 	public async ValueTask DisposeAsync() {
 		await _app.StopAsync();

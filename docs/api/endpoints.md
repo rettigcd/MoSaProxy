@@ -77,6 +77,83 @@ The summary, the request and response heads with their headers in the order capt
 | 200 OK | `application/json` ExchangeDetail |
 | 404 Not Found | `application/json` ProblemDetails |
 
+### `GET /api/exchanges/{id}/request`
+
+**The request exactly as captured** (`GetRequestBytes`)
+
+The request head and body as the bytes captured, including any chunk framing and content coding. For a CONNECT it is whatever followed the request.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `id` | path | integer (int32) | yes |
+
+| Response | Content |
+|---|---|
+| 200 OK | `application/octet-stream` string (byte) |
+| 404 Not Found | `application/problem+json` ProblemDetails |
+
+### `GET /api/exchanges/{id}/response`
+
+**The response exactly as captured** (`GetResponseBytes`)
+
+The response head and body as the bytes captured, including any chunk framing and content coding.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `id` | path | integer (int32) | yes |
+
+| Response | Content |
+|---|---|
+| 200 OK | `application/octet-stream` string (byte) |
+| 404 Not Found | `application/problem+json` ProblemDetails |
+
+### `GET /api/exchanges/{id}/request/body`
+
+**The request body** (`GetRequestBody`)
+
+Just the body, served with the request's own Content-Type. With decode=true the chunk framing and any gzip, deflate or brotli coding are removed, and the X-MoSaProxy-Decoded response header says whether that worked (it stays false for a coding that is not known or a body that is damaged, and the body is then as captured).
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `id` | path | integer (int32) | yes |
+| `decode` | query | boolean | no |
+
+| Response | Content |
+|---|---|
+| 200 OK | `application/octet-stream` string (byte) |
+| 404 Not Found | `application/problem+json` ProblemDetails |
+
+### `GET /api/exchanges/{id}/response/body`
+
+**The response body** (`GetResponseBody`)
+
+Just the body, served with the response's own Content-Type. With decode=true the chunk framing and any gzip, deflate or brotli coding are removed, and the X-MoSaProxy-Decoded response header says whether that worked (it stays false for a coding that is not known or a body that is damaged, and the body is then as captured).
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `id` | path | integer (int32) | yes |
+| `decode` | query | boolean | no |
+
+| Response | Content |
+|---|---|
+| 200 OK | `application/octet-stream` string (byte) |
+| 404 Not Found | `application/problem+json` ProblemDetails |
+
+### `GET /api/exchanges/{id}/websocket`
+
+**The log of a WebSocket exchange's messages** (`GetWebSocketLog`)
+
+The readable log the proxy wrote for the messages sent each way. Only exchanges whose detail says a WebSocket log exists have one.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `id` | path | integer (int32) | yes |
+
+| Response | Content |
+|---|---|
+| 200 OK | `text/plain` string |
+| 404 Not Found | `application/problem+json` ProblemDetails |
+
 ## Models
 
 ### ApiCaptureRequest

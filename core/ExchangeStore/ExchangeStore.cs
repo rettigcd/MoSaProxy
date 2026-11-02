@@ -66,6 +66,15 @@ public sealed class ExchangeStore(string directory) {
 	/// <summary>The readable log of a WebSocket exchange's messages (<c>N_w.txt</c>), or null if it has none. The caller disposes the stream.</summary>
 	public Stream? OpenWebSocketLog(int id) => Open(id, $"{id}_w.txt");
 
+	/// <summary>The body of an exchange's request or response, optionally with chunking and content coding removed. Null if there is no such exchange or its file holds no complete head.</summary>
+	public BodyContent? Body(int id, bool response, bool decode) {
+		using var stream = response ? OpenResponse(id) : OpenRequest(id);
+		if (stream is null) return null;
+		var buffer = new MemoryStream();
+		stream.CopyTo(buffer);
+		return HttpBody.Extract(buffer.ToArray(), decode);
+	}
+
 	Stream? Open(int id, string name) {
 		if (Summary(id) is null) return null;
 		try { return new FileStream(Path.Combine(directory, name), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete); }

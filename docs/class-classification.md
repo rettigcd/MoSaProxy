@@ -23,11 +23,11 @@ A class is placed by its main focus. A line or two of console output inside an o
 
 | Category | Types |
 |---|---|
-| Core | 71 |
+| Core | 73 |
 | UI | 15 |
 | Mix | 0 |
 | Other | 0 |
-| **Total** | **86** (85 declared types, plus the `Program` class the compiler generates) |
+| **Total** | **88** (87 declared types, plus the `Program` class the compiler generates) |
 
 ## Core (71)
 
@@ -69,6 +69,8 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `ExchangeStore` | class | `ExchangeStore/ExchangeStore.cs` | Reads the exchanges captured into a run folder: a filtered, paged list of summaries, one exchange's details, and its request, response and WebSocket-log bytes. It only reads. |
 | `ExchangeSummary` | record | `ExchangeStore/ExchangeSummary.cs` | What a list shows for one captured exchange. |
 | `ExchangeDetail` | record | `ExchangeStore/ExchangeSummary.cs` | Everything known about one captured exchange except its bodies. |
+| `HttpBody` | static class | `ExchangeStore/HttpBody.cs` | Splits a captured message into head and body and, on request, removes chunk framing and gzip, deflate or brotli coding. |
+| `BodyContent` | record | `ExchangeStore/HttpBody.cs` | A body taken from a captured message, with its content type and whether it was decoded. |
 | `HttpHead` | record | `ExchangeStore/ExchangeSummary.cs` | A captured message's first line and headers, in order. |
 | `ExchangeQuery` | record | `ExchangeStore/ExchangeSummary.cs` | The filters, paging and limit for listing exchanges. |
 | `CaptureEvents` | class | `SessionCapture/CaptureEvents.cs` | What a front end can watch: an exchange started or finished, a WebSocket message passed, capture switched on or off. A handler that throws is ignored. |
