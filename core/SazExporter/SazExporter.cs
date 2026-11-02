@@ -34,13 +34,15 @@ public static class SazExporter {
 	public static string DefaultOutputPath(string runDirectory) => runDirectory.TrimEnd('\\', '/') + ".saz";
 
 	/// <summary>Writes the archive and returns how many exchanges (sessions) it holds. An existing file at <paramref name="outputPath"/> is replaced.</summary>
-	public static int Export(string runDirectory, string outputPath) {
+	/// <param name="only">The exchange numbers to include, or null for every exchange in the folder.</param>
+	public static int Export(string runDirectory, string outputPath, IReadOnlyCollection<int>? only = null) {
 		if (!Directory.Exists(runDirectory)) throw new DirectoryNotFoundException($"Capture folder not found: {runDirectory}");
 
 		var numbers = Directory.GetFiles(runDirectory)
 			.Select(path => RequestFile.Match(Path.GetFileName(path)))
 			.Where(match => match.Success)
 			.Select(match => int.Parse(match.Groups[1].Value))
+			.Where(number => only is null || only.Contains(number))
 			.Order()
 			.ToList();
 		if (numbers.Count == 0) throw new InvalidOperationException($"No captured exchanges (N_c.txt files) found in {runDirectory}");

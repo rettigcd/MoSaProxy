@@ -450,6 +450,73 @@
         }
       }
     },
+    "/api/export/saz": {
+      "get": {
+        "tags": [
+          "Export"
+        ],
+        "summary": "Download the captured exchanges as a .saz archive",
+        "description": "A Fiddler Session Archive of every finished exchange, or only those listed in ids (comma-separated numbers; ones that do not exist or have not finished are left out). 404 if that leaves nothing. The archive is built when asked for, so it holds what was captured up to then.",
+        "operationId": "ExportSaz",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "byte"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stop": {
+      "post": {
+        "tags": [
+          "Status"
+        ],
+        "summary": "Start the graceful shutdown",
+        "description": "Does what the first Ctrl+C does: the proxy stops taking new connections, waits for running exchanges to finish (the drain period), and the program exits, deleting the capture folder. Answers 202 at once and does not wait; the API itself goes away when the program exits.",
+        "operationId": "StopProxy",
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          }
+        }
+      }
+    },
     "/api/stream": {
       "get": {
         "tags": [
@@ -894,6 +961,9 @@
     },
     {
       "name": "Exchanges"
+    },
+    {
+      "name": "Export"
     },
     {
       "name": "Stream"

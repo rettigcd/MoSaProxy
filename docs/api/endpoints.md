@@ -16,6 +16,16 @@ The proxy's port, whether it intercepts HTTPS and offers HTTP/2, whether capture
 |---|---|
 | 200 OK | `application/json` ApiStatus |
 
+### `POST /api/stop`
+
+**Start the graceful shutdown** (`StopProxy`)
+
+Does what the first Ctrl+C does: the proxy stops taking new connections, waits for running exchanges to finish (the drain period), and the program exits, deleting the capture folder. Answers 202 at once and does not wait; the API itself goes away when the program exits.
+
+| Response | Content |
+|---|---|
+| 202 Accepted |  |
+
 ## Capture
 
 ### `GET /api/capture`
@@ -152,6 +162,24 @@ The readable log the proxy wrote for the messages sent each way. Only exchanges 
 | Response | Content |
 |---|---|
 | 200 OK | `text/plain` string |
+| 404 Not Found | `application/problem+json` ProblemDetails |
+
+## Export
+
+### `GET /api/export/saz`
+
+**Download the captured exchanges as a .saz archive** (`ExportSaz`)
+
+A Fiddler Session Archive of every finished exchange, or only those listed in ids (comma-separated numbers; ones that do not exist or have not finished are left out). 404 if that leaves nothing. The archive is built when asked for, so it holds what was captured up to then.
+
+| Parameter | In | Type | Required |
+|---|---|---|---|
+| `ids` | query | string | no |
+
+| Response | Content |
+|---|---|
+| 200 OK | `application/zip` string (byte) |
+| 400 Bad Request | `application/problem+json` ProblemDetails |
 | 404 Not Found | `application/problem+json` ProblemDetails |
 
 ## Stream

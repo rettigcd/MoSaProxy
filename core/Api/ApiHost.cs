@@ -154,11 +154,43 @@ public sealed class ApiHost : IAsyncDisposable {
 			.WithTags("Exchanges").WithName("GetWebSocketLog").WithSummary("The log of a WebSocket exchange's messages")
 			.WithDescription("The readable log the proxy wrote for the messages sent each way. Only exchanges whose detail says a WebSocket log exists have one.");
 
+		api.MapGet("/export/saz", (string? ids) => ExportSaz(proxy, ids))
+			.Produces<byte[]>(StatusCodes.Status200OK, "application/zip").ProducesProblem(StatusCodes.Status400BadRequest).ProducesProblem(StatusCodes.Status404NotFound)
+			.WithTags("Export").WithName("ExportSaz").WithSummary("Download the captured exchanges as a .saz archive")
+			.WithDescription("A Fiddler Session Archive of every finished exchange, or only those listed in ids (comma-separated numbers; ones that do not exist or have not finished are left out). 404 if that leaves nothing. The archive is built when asked for, so it holds what was captured up to then.");
+
+		api.MapPost("/stop", () => {
+				proxy.RequestStop();
+				return TypedResults.Accepted((string?)null);
+			})
+			.WithTags("Status").WithName("StopProxy").WithSummary("Start the graceful shutdown")
+			.WithDescription("Does what the first Ctrl+C does: the proxy stops taking new connections, waits for running exchanges to finish (the drain period), and the program exits, deleting the capture folder. Answers 202 at once and does not wait; the API itself goes away when the program exits.");
+
 		api.MapGet("/stream", (HttpContext context, CancellationToken _) => StreamEvents(context, feed, stopping))
 			.Produces(StatusCodes.Status200OK, contentType: "text/event-stream")
 			.WithTags("Stream").WithName("StreamEvents").WithSummary("Live events as exchanges are captured")
 			.WithDescription("Server-Sent Events, kept open. Each event has an id that only grows, a name and JSON data. Events: exchange-started {id}; exchange-finished {id} (the exchange can now be read); websocket-message {exchange, fromClient, type, totalBytes}; capture {enabled}; reset {} (sent when the events asked for after Last-Event-ID are no longer remembered: fetch the exchange list again). A connection with no Last-Event-ID (header, or the lastEventId query parameter) gets only what happens from then on; one with it first gets the events it missed. A comment line is sent every 15 seconds to keep the connection alive. A browser's EventSource cannot set headers, so pass the token as the token query parameter.");
 	}
+
+	static IResult ExportSaz(ProxyHost proxy, string? ids) {
+		if (proxy.Exchanges is not { } store || proxy.CaptureRunDirectory is not { } folder) return TypedResults.NotFound(NotFoundProblem("There is nothing captured to export."));
+		var wanted = new List<int>();
+		foreach (string part in (ids ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)) {
+			if (!int.TryParse(part, out int number)) return TypedResults.Problem($"'{part}' in ids is not an exchange number.", statusCode: StatusCodes.Status400BadRequest);
+			wanted.Add(number);
+		}
+		// Only exchanges that have finished: one still running has request bytes but no metadata yet.
+		var finished = store.List(new ExchangeQuery { Limit = int.MaxValue }).Select(e => e.Id).Where(n => ids is null || wanted.Contains(n)).ToList();
+		if (finished.Count == 0) return TypedResults.NotFound(NotFoundProblem("No finished captured exchange matches."));
+
+		string path = Path.Combine(Path.GetTempPath(), $"MoSaProxy-export-{Guid.NewGuid():N}.saz");
+		SazExporter.Export(folder, path, finished);
+		// (deleted as soon as the response has been sent)
+		var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 4096, FileOptions.DeleteOnClose);
+		return TypedResults.File(file, "application/zip", "mosaproxy.saz");
+	}
+
+	static ProblemDetails NotFoundProblem(string detail) => new() { Title = "Nothing to export", Detail = detail, Status = StatusCodes.Status404NotFound };
 
 	static async Task StreamEvents(HttpContext context, ApiEventFeed feed, CancellationToken stopping) {
 		using var cancel = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, stopping);

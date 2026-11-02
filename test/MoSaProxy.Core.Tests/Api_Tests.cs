@@ -376,6 +376,109 @@ public class Api_Tests {
 		response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
 	}
 
+	// ---- export and stop ------------------------------------------------------------------------------------------------------
+
+	static async Task<System.IO.Compression.ZipArchive> ZipOf(HttpResponseMessage response) =>
+		new(new MemoryStream(await response.Content.ReadAsByteArrayAsync()));
+
+	[Fact]
+	public async Task ExportSaz_WithoutIds_DownloadsAllFinishedExchanges() {
+
+		// Given: two captured requests
+		await using var origin = await StartOriginAsync();
+		await using var api = await TestApi.StartAsync();
+		await api.CaptureOneAsync(origin, "/one", 1);
+		await api.CaptureOneAsync(origin, "/two", 2);
+
+		// When: the archive is downloaded
+		var response = await api.Client.GetAsync("api/export/saz");
+		using var zip = await ZipOf(response);
+
+		// Then: it is a zip named mosaproxy.saz holding both exchanges' request files
+		response.Content.Headers.ContentType!.MediaType.ShouldBe("application/zip");
+		response.Content.Headers.ContentDisposition!.FileName.ShouldBe("mosaproxy.saz");
+		zip.Entries.Select(e => e.FullName).Where(n => n.EndsWith("_c.txt")).ShouldBe(new[] { "raw/1_c.txt", "raw/2_c.txt" });
+	}
+
+	[Fact]
+	public async Task ExportSaz_WithIds_HoldsOnlyThoseExchanges() {
+
+		// Given: three captured requests
+		await using var origin = await StartOriginAsync();
+		await using var api = await TestApi.StartAsync();
+		await api.CaptureOneAsync(origin, "/one", 1);
+		await api.CaptureOneAsync(origin, "/two", 2);
+		await api.CaptureOneAsync(origin, "/three", 3);
+
+		// When: exchanges 1 and 3 are asked for (and 99, which does not exist)
+		var response = await api.Client.GetAsync("api/export/saz?ids=1,3,99");
+		using var zip = await ZipOf(response);
+
+		// Then: the archive has just those two
+		zip.Entries.Select(e => e.FullName).Where(n => n.EndsWith("_c.txt")).ShouldBe(new[] { "raw/1_c.txt", "raw/3_c.txt" });
+	}
+
+	[Fact]
+	public async Task ExportSaz_WithNothingToExport_Answers404() {
+
+		// Given: nothing captured
+		await using var api = await TestApi.StartAsync();
+
+		// When: an archive is asked for, all of it and by number
+		var all = await api.Client.GetAsync("api/export/saz");
+		var some = await api.Client.GetAsync("api/export/saz?ids=5");
+
+		// Then: both are 404
+		all.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+		some.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+	}
+
+	[Fact]
+	public async Task ExportSaz_WithAnIdThatIsNotANumber_Answers400() {
+
+		// Given: the API running
+		await using var api = await TestApi.StartAsync();
+
+		// When: an archive is asked for with a bad id
+		var response = await api.Client.GetAsync("api/export/saz?ids=1,abc");
+
+		// Then: the answer is 400
+		response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+	}
+
+	[Fact]
+	public async Task ExportSaz_LeavesNoTemporaryFileBehind() {
+
+		// Given: a captured request and the temporary files already in the temp folder
+		await using var origin = await StartOriginAsync();
+		await using var api = await TestApi.StartAsync();
+		await api.CaptureOneAsync(origin, "/one", 1);
+		var before = Directory.GetFiles(Path.GetTempPath(), "MoSaProxy-export-*.saz").ToHashSet();
+
+		// When: the archive is downloaded in full
+		(await api.Client.GetAsync("api/export/saz")).EnsureSuccessStatusCode();
+		await Task.Delay(100);
+
+		// Then: no export file is left
+		Directory.GetFiles(Path.GetTempPath(), "MoSaProxy-export-*.saz").Except(before).ShouldBeEmpty();
+	}
+
+	[Fact]
+	public async Task PostStop_AsksTheProxyToStop() {
+
+		// Given: a running proxy that nobody has asked to stop
+		await using var api = await TestApi.StartAsync();
+		var stopRequested = api.Proxy.Host.WaitForStopRequestAsync();
+		stopRequested.IsCompleted.ShouldBeFalse();
+
+		// When: the stop is posted
+		var response = await api.Client.PostAsync("api/stop", null);
+
+		// Then: the answer is 202 and the proxy's stop request completes
+		response.StatusCode.ShouldBe(HttpStatusCode.Accepted);
+		await stopRequested.WaitAsync(TimeSpan.FromSeconds(5));
+	}
+
 	[Fact]
 	public async Task GetExchange_ThatDoesNotExist_Answers404WithAProblemDescription() {
 

@@ -87,7 +87,7 @@ Build in this order:
    - **Built.** Events for "exchange started" and "exchange finished" (so the UI can show a request that is still running), and for
      WebSocket messages. Replacing Core's direct console output with events is still part of the Core cleanup above.
    - Tests in `test/MoSaProxy.Core.Tests` through the Core types only, with no web server.
-2. **A local API.** *(built: status, capture, exchange list and detail, the byte, body and WebSocket-log endpoints, the event stream, the safety checks, `--api-port` / `--no-api`, and the OpenAPI documents with their test; see [capabilities.md](capabilities.md) and [api/endpoints.md](api/endpoints.md). Still to build: the `.saz` download and stop.)* A second Kestrel listener (same process, so live data is direct) that exposes the store. The endpoints are
+2. **A local API.** *(built: status, capture, exchange list and detail, the byte, body and WebSocket-log endpoints, the event stream, the `.saz` download, stop, the safety checks, `--api-port` / `--no-api`, and the OpenAPI documents with their test; see [capabilities.md](capabilities.md) and [api/endpoints.md](api/endpoints.md). Step 2 is complete.)* A second Kestrel listener (same process, so live data is direct) that exposes the store. The endpoints are
    thin: each calls Core and returns JSON. Starting set:
 
    | Endpoint | Purpose |
