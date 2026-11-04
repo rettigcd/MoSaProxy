@@ -23,11 +23,11 @@ A class is placed by its main focus. A line or two of console output inside an o
 
 | Category | Types |
 |---|---|
-| Core | 75 |
+| Core | 78 |
 | UI | 15 |
 | Mix | 0 |
 | Other | 0 |
-| **Total** | **90** (89 declared types, plus the `Program` class the compiler generates) |
+| **Total** | **93** (92 declared types, plus the `Program` class the compiler generates) |
 
 ## Core (71)
 
@@ -38,6 +38,7 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `StopResult` | record | `ProxyHost/StopResult.cs` | How a run ended: why it stopped, the shutdown report, and the first limit hit, if any. |
 | `ProxyHandler` | class | `ProxyHandler.cs` | Forwards each HTTP request to its origin, including HTTP/2 negotiation, bodies, trailers, and timeouts. |
 | `ProxyOptions` | class | `ProxyOptions.cs` | The settings the proxy runs with, and the one definition of each default (timeouts, interception, rotation, drain, and so on). It holds no parsing or user-facing text. |
+| `InterceptSettings` | class | `TunnelHandler/InterceptSettings.cs` | Whether tunnels are decrypted and which hosts are skipped, as it stands now; the tunnel handler asks it for every CONNECT. |
 | `TunnelHandler` | class | `TunnelHandler/TunnelHandler.cs` | Handles `CONNECT` ahead of Kestrel: blind tunnels, sniffing TLS versus HTTP, and TLS interception. |
 | `TunnelRelay` | static class | `TunnelRelay.cs` | Copies bytes both ways between client and origin, with half-close and idle handling. |
 | `WebSocketProxy` | class | `WebSocketProxy/WebSocketProxy.cs` | Opens a WebSocket to the origin, accepts the client's, and copies messages and close codes. |
@@ -64,6 +65,8 @@ A class is placed by its main focus. A line or two of console output inside an o
 | `ApiHost` | class | `Api/ApiHost.cs` | The local API: a second loopback Kestrel listener over a `ProxyHost` that serves the captured exchanges, the capture switch and its own OpenAPI description, behind Host, Origin and token checks. It has no console code. |
 | `ApiStatus` | record | `Api/ApiModels.cs` | The answer of `GET /api/status`. |
 | `ApiCaptureState` | record | `Api/ApiModels.cs` | The answer of the capture endpoints. |
+| `ApiInterceptState` | record | `Api/ApiModels.cs` | The answer of the interception endpoints: on or off, the skipped hosts, and the root certificate's name, file and trust. |
+| `ApiInterceptRequest` | record | `Api/ApiModels.cs` | The body of `PUT /api/intercept`. |
 | `ApiCaptureRequest` | record | `Api/ApiModels.cs` | The body of `PUT /api/capture`. |
 | `ApiExchangePage` | record | `Api/ApiModels.cs` | One page of the exchange list, with the number to ask for the next page. |
 | `ExchangeStore` | class | `ExchangeStore/ExchangeStore.cs` | Reads the exchanges captured into a run folder: a filtered, paged list of summaries, one exchange's details, and its request, response and WebSocket-log bytes. It only reads. |

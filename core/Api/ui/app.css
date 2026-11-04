@@ -16,6 +16,14 @@ button { background: var(--bg); border: 1px solid var(--line); border-radius: 4p
 button:hover { border-color: var(--accent); }
 button.on { border-color: var(--ok); color: var(--ok); }
 button.off { border-color: var(--warn); color: var(--warn); }
+button.warn { border-color: var(--warn); color: var(--warn); }
+#banner { padding: 6px 12px; background: var(--panel); border-bottom: 1px solid var(--warn); color: var(--warn); }
+#banner code { color: var(--fg); }
+dialog { background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; max-width: 520px; width: 90vw; }
+dialog::backdrop { background: #0006; }
+dialog h2 { font-size: 15px; margin: 0 0 6px; }
+dialog textarea { width: 100%; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; font: 12px ui-monospace, Consolas, monospace; padding: 6px; }
+dialog .buttons { margin-top: 10px; text-align: right; }
 input[type=search] { background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; width: 220px; }
 a#export { color: var(--accent); }
 .spacer { flex: 1; }

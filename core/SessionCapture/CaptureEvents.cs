@@ -18,6 +18,14 @@ public sealed class CaptureEvents {
 	/// <summary>Capture was switched on (true) or off (false).</summary>
 	public event Action<bool>? CaptureEnabledChanged;
 
+	/// <summary>HTTPS interception was switched on (true) or off (false).</summary>
+	public event Action<bool>? InterceptChanged;
+
+	/// <summary>The list of hosts that are not decrypted was replaced; the argument is the new list.</summary>
+	public event Action<IReadOnlyList<string>>? BypassChanged;
+
+	internal void RaiseInterceptChanged(bool enabled) => Raise(InterceptChanged, enabled);
+	internal void RaiseBypassChanged(IReadOnlyList<string> hosts) => Raise(BypassChanged, hosts);
 	internal void RaiseStarted(int number) => Raise(ExchangeStarted, number);
 	internal void RaiseFinished(int number) => Raise(ExchangeFinished, number);
 	internal void RaiseWebSocketMessage(WebSocketMessageInfo message) => Raise(WebSocketMessage, message);

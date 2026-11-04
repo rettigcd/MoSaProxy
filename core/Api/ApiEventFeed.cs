@@ -28,6 +28,8 @@ sealed class ApiEventFeed : IDisposable {
 		events.ExchangeFinished += OnFinished;
 		events.WebSocketMessage += OnWebSocketMessage;
 		events.CaptureEnabledChanged += OnCaptureChanged;
+		events.InterceptChanged += OnInterceptChanged;
+		events.BypassChanged += OnBypassChanged;
 	}
 
 	static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -36,6 +38,8 @@ sealed class ApiEventFeed : IDisposable {
 	void OnFinished(int id) => Add("exchange-finished", new { id });
 	void OnWebSocketMessage(WebSocketMessageInfo m) => Add("websocket-message", new { exchange = m.Number, fromClient = m.FromClient, type = m.Type.ToString(), totalBytes = m.TotalBytes });
 	void OnCaptureChanged(bool enabled) => Add("capture", new { enabled });
+	void OnInterceptChanged(bool enabled) => Add("intercept", new { enabled });
+	void OnBypassChanged(IReadOnlyList<string> hosts) => Add("bypass", new { hosts });
 
 	void Add(string name, object data) {
 		TaskCompletionSource signal;
@@ -67,5 +71,7 @@ sealed class ApiEventFeed : IDisposable {
 		_events.ExchangeFinished -= OnFinished;
 		_events.WebSocketMessage -= OnWebSocketMessage;
 		_events.CaptureEnabledChanged -= OnCaptureChanged;
+		_events.InterceptChanged -= OnInterceptChanged;
+		_events.BypassChanged -= OnBypassChanged;
 	}
 }

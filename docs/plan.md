@@ -135,7 +135,7 @@ Build in this order:
      - Tests: the description is valid OpenAPI, every mapped endpoint appears in it with a summary, and each response type
        matches what the endpoint really returns (spot-checked through the real listener).
 
-   Left for later: changing other settings while running (the options are fixed at start-up today; the interception switch is planned under HTTPS interception), clearing the captured exchanges (turning capture off already stops new ones), replaying a
+   Left for later: changing other settings while running (the options are fixed at start-up today), clearing the captured exchanges (turning capture off already stops new ones), replaying a
    request, and the HAR and mitmproxy exports (add `/api/export/har` and `/api/export/flow` when those formats exist).
    - **Safety.** The listener is loopback-only. The UI shows credentials and cookies, and a web page on another site could
      try to call a local API, so every request must be checked: reject a wrong `Host` header (DNS rebinding), reject any
@@ -152,36 +152,7 @@ Once these work, grow both together (filters, search, export buttons, settings).
 
 ### HTTPS interception
 
-- **Switch interception on and off while running (from the API and UI).** Today `--intercept` and `--intercept-bypass` are read once
-  at start-up (`ProxyHost` loads the root CA only if `Intercept` is set, and `TunnelHandler` reads the option on every CONNECT).
-  Like the capture switch, the setting is read fresh for each CONNECT, so a change affects the next tunnel only: a tunnel already
-  open keeps the mode it began with. Trust stays manual, as today.
-  - **Core.** `ProxyHost.InterceptEnabled` (get/set, volatile) and `ProxyHost.InterceptBypass` (get/set, replaced as a whole list),
-    both starting from the options. `TunnelHandler` reads them through a small settings object instead of `ProxyOptions`.
-    The root CA is loaded or created the first time interception is switched on (`CertificateAuthority.LoadOrCreate`) and kept
-    after that; switching off does not delete it. If loading fails, the switch stays off and the caller is told why.
-    `CaptureEvents` gains `InterceptChanged` (bool) and `BypassChanged` for the stream.
-  - **API.** `GET /api/intercept` answers `{enabled, bypass, caTrusted, caSubject, caFile}`; `PUT /api/intercept` takes
-    `{enabled?, bypass?}` (either may be left out) and answers the same. `caTrusted` is looked up through `IRootStore`
-    (`FindThumbprintsBySubject`). `ApiStatus.Intercept` follows the live value, not the option. New stream events `intercept`
-    `{enabled}` and `bypass` `{hosts}`. Switching on is refused with 409 and a problem description when the root CA cannot be
-    made. Add the endpoints to the OpenAPI document and regenerate `docs/api` with `MOSAPROXY_UPDATE_API_DOCS=1`.
-  - **Trust.** The switch never changes the machine's trust store. If `caTrusted` is false when interception is on, the UI shows a
-    warning saying clients will show certificate errors, with the CA file path and the `--untrust-ca` / trust steps from
-    [capabilities.md](capabilities.md). Installing the root from a button (a Windows confirmation dialog) is a separate,
-    later decision.
-  - **UI.** A header button like the capture one (*Intercept: on/off*, a warning mark when untrusted), and a small bypass-hosts
-    editor (one pattern per line, same pattern rules as `--intercept-bypass`), reached from the button. The button follows the
-    `intercept` event, so two open pages agree.
-  - **Tests** (given / when / then, using the fake origin and the test root store): off by default and on when the option is set;
-    a CONNECT after switching on is decrypted (an `intercept` exchange appears with its inner requests) and one after switching
-    off is a blind tunnel; a tunnel open at the time of the switch keeps its mode; a bypassed host stays a tunnel while on, and
-    changing the list applies to the next CONNECT; the CA is created on first switch-on and left alone on later ones; a failing CA
-    load gives 409 and leaves it off; `caTrusted` reflects the fake root store; the events reach the stream; token and Origin
-    refusals apply to the new endpoints; the OpenAPI files match.
-  - **Open points.** Whether HTTP/2 or a WebSocket upgrade inside an intercepted tunnel needs anything extra when the switch
-    flips mid-connection (it should not: they follow their tunnel). Whether to remember the last setting between runs (probably
-    not: each run starts from the command line, like every other option).
+- Install the root certificate's trust from the UI (Windows asks the user to confirm). The interception switch only reports whether the root is trusted; installing it is still a manual step (see [capabilities.md](capabilities.md)).
 - Automatic fallback to a blind tunnel for hosts whose handshake fails (certificate pinning). For now, use `--intercept-bypass`.
 - Rename the root CA's subject, file names and folder from "mos" to MoSaProxy. This needs a migration so a root already trusted
   on a machine keeps being recognized (see the note in `CertificateAuthority.cs`).

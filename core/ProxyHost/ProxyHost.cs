@@ -12,12 +12,14 @@ public sealed class ProxyHost : IAsyncDisposable {
 	readonly CancellationTokenSource _abort;      // the drain period is over: whatever is left is cut off
 	readonly SwitchableSessionCapture _capture;
 	readonly CaptureEvents _events;
+	readonly InterceptSettings _intercept;
+	readonly object _interceptLock = new();
 	readonly CaptureRun? _captureRun;             // the temporary capture folder, deleted on dispose; null when the caller supplied the capture
 	readonly object _stopLock = new();
 	Task<ShutdownReport>? _stopTask;
 
 	ProxyHost(WebApplication app, ProxyHandler handler, ProxyActivity activity, ResourceLimitMonitor limits, CancellationTokenSource stopping,
-		CancellationTokenSource abort, int port, string? captureRunDirectory, CaptureRun? captureRun, SwitchableSessionCapture capture, CaptureEvents events, CertificateAuthority? authority) {
+		CancellationTokenSource abort, int port, string? captureRunDirectory, CaptureRun? captureRun, SwitchableSessionCapture capture, CaptureEvents events, InterceptSettings intercept) {
 		_app = app;
 		_handler = handler;
 		Activity = activity;
@@ -30,7 +32,7 @@ public sealed class ProxyHost : IAsyncDisposable {
 		_capture = capture;
 		_events = events;
 		Exchanges = captureRunDirectory is null ? null : new ExchangeStore(captureRunDirectory);
-		Authority = authority;
+		_intercept = intercept;
 	}
 
 	/// <summary>The settings this host was started with.</summary>
@@ -67,8 +69,57 @@ public sealed class ProxyHost : IAsyncDisposable {
 	/// <summary>Why the temporary capture folder could not be deleted when the host was disposed, or null if it was (or there is none to delete).</summary>
 	public string? CaptureCleanupError => _captureRun?.DeleteError;
 
-	/// <summary>The certificate authority used for HTTPS interception, or null when interception is off.</summary>
-	public CertificateAuthority? Authority { get; }
+	/// <summary>The certificate authority used for HTTPS interception, or null while interception has never been on (it is made the first time it is needed).</summary>
+	public CertificateAuthority? Authority => _intercept.Authority;
+
+	/// <summary>Whether CONNECT tunnels opened now are decrypted. Change it with <see cref="SetInterceptEnabled"/>.</summary>
+	public bool InterceptEnabled => _intercept.Enabled;
+
+	/// <summary>The hosts that are never decrypted: an exact name, or <c>*.suffix</c>. Change it with <see cref="SetInterceptBypass"/>.</summary>
+	public IReadOnlyList<string> InterceptBypass => _intercept.Bypass;
+
+	/// <summary>
+	/// Switches HTTPS interception on or off for tunnels opened from now on; one already open keeps the mode it began with. The first time
+	/// it is switched on the root certificate authority is loaded from the CA folder, or created there if there is none, and it is kept
+	/// afterwards. This never changes what the machine trusts.
+	/// </summary>
+	/// <exception cref="InvalidOperationException">The certificate authority could not be loaded or created; interception stays as it was.</exception>
+	public void SetInterceptEnabled(bool enabled) {
+		bool changed;
+		lock (_interceptLock) {
+			if (enabled && _intercept.Authority is null) {
+				try { _intercept.Authority = CertificateAuthority.LoadOrCreate(Options.CaDirectory); }
+				catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException) {
+					throw new InvalidOperationException($"The root certificate in {Options.CaDirectory} could not be loaded or created: {ex.Message}", ex);
+				}
+			}
+			changed = _intercept.Enabled != enabled;
+			_intercept.Enabled = enabled;
+		}
+		if (changed) _events.RaiseInterceptChanged(enabled);
+	}
+
+	/// <summary>
+	/// Replaces the list of hosts that are not decrypted. Blank entries and repeats are dropped. Applies to tunnels opened from now on.
+	/// </summary>
+	/// <exception cref="ArgumentException">An entry is not a host name pattern (see <see cref="IsValidBypassPattern"/>).</exception>
+	public void SetInterceptBypass(IEnumerable<string> hosts) {
+		var cleaned = hosts.Select(h => h.Trim()).Where(h => h.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+		if (cleaned.FirstOrDefault(h => !IsValidBypassPattern(h)) is { } bad)
+			throw new ArgumentException($"'{bad}' is not a host name or a *.suffix pattern.");
+		bool changed;
+		lock (_interceptLock) {
+			changed = !_intercept.Bypass.SequenceEqual(cleaned, StringComparer.Ordinal);
+			_intercept.Bypass = cleaned;
+		}
+		if (changed) _events.RaiseBypassChanged(cleaned);
+	}
+
+	/// <summary>True for a host name (or IP address) or a <c>*.suffix</c> pattern: letters, digits, dots, hyphens and underscores, or colons and brackets for an IPv6 address; no spaces, slashes, ports or other wildcards.</summary>
+	public static bool IsValidBypassPattern(string pattern) {
+		string host = pattern.StartsWith("*.", StringComparison.Ordinal) ? pattern[2..] : pattern;
+		return host.Length > 0 && host.Length <= 253 && host.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' or '_' or ':' or '[' or ']');
+	}
 
 	/// <summary>How many requests, tunnels and WebSockets are in flight right now.</summary>
 	public ProxyActivity Activity { get; }
@@ -108,13 +159,14 @@ public sealed class ProxyHost : IAsyncDisposable {
 	static async Task<ProxyHost> StartListeningAsync(ProxyOptions options, IExchangeLog log, SwitchableSessionCapture capture, CaptureEvents events, bool tapWire, ResourceLimitMonitor limits,
 		string? runDirectory, CaptureRun? captureRun) {
 		var authority = options.Intercept ? CertificateAuthority.LoadOrCreate(options.CaDirectory) : null;
+		var intercept = new InterceptSettings(options.Intercept, options.InterceptBypass, authority);
 		var activity = new ProxyActivity();
 		var stopping = new CancellationTokenSource();
 		var abort = new CancellationTokenSource();
 		// The taps cannot be added later, so they are always there when anything can keep what they record; an exchange that is not
 		// captured still takes its wire bytes, which frees them.
 		var wireTaps = tapWire ? new WireTaps(limits, log, capture) : null;
-		var tunnels = new TunnelHandler(log, capture, options, stopping.Token, abort.Token, activity, limits, authority);
+		var tunnels = new TunnelHandler(log, capture, options, stopping.Token, abort.Token, activity, limits, intercept);
 		var builder = WebApplication.CreateSlimBuilder();
 		builder.Logging.ClearProviders();
 		// The drain period is ours to decide (StopAsync), so the host's own shutdown time limit must not cut it short.
@@ -138,7 +190,7 @@ public sealed class ProxyHost : IAsyncDisposable {
 		await app.StartAsync();
 
 		var address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
-		return new ProxyHost(app, handler, activity, limits, stopping, abort, new Uri(address).Port, runDirectory, captureRun, capture, events, authority);
+		return new ProxyHost(app, handler, activity, limits, stopping, abort, new Uri(address).Port, runDirectory, captureRun, capture, events, intercept);
 	}
 
 	/// <summary>

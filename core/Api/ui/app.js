@@ -2,7 +2,7 @@
 // MoSaProxy browser UI. Everything captured is untrusted text: it is only ever put on the page with textContent (never as markup).
 
 const MAX_SHOWN_BYTES = 1024 * 1024;
-const state = { token: null, rows: new Map(), filter: '', selected: null, capture: true, tab: 'overview', loadId: 0 };
+const state = { token: null, rows: new Map(), filter: '', selected: null, capture: true, intercept: null, tab: 'overview', loadId: 0 };
 
 // ---- token ---------------------------------------------------------------------------------------------------------------
 
@@ -222,6 +222,53 @@ $('capture').addEventListener('click', async () => {
   catch (error) { alert('Could not change capture: ' + error.message); }
 });
 
+// ---- interception ----------------------------------------------------------------------------------------------------------
+
+function showIntercept(s) {
+  state.intercept = s;
+  const untrusted = s.enabled && s.caTrusted === false;
+  const button = $('intercept');
+  button.textContent = 'Intercept: ' + (s.enabled ? 'on' : 'off') + (untrusted ? ' ⚠' : '');
+  button.className = untrusted ? 'warn' : s.enabled ? 'on' : 'off';
+  $('bypass').textContent = s.bypass.length ? `Skip hosts (${s.bypass.length})…` : 'Skip hosts…';
+  const banner = $('banner');
+  if (untrusted) {
+    banner.replaceChildren("This computer does not trust the proxy's root certificate, so browsers will show certificate errors for decrypted sites. Trust ",
+      el('code', {}, s.caFile || 'the root certificate'), ' in the browser or Windows, or turn interception off.');
+    banner.hidden = false;
+  } else banner.hidden = true;
+}
+
+const loadIntercept = async () => showIntercept(await json('intercept'));
+
+async function putIntercept(body) {
+  const response = await fetch('api/intercept', { method: 'PUT', headers: { 'X-MoSaProxy-Token': state.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.detail || `${response.status} ${response.statusText}`);
+  showIntercept(result);
+}
+
+$('intercept').addEventListener('click', async () => {
+  try { await putIntercept({ enabled: !state.intercept.enabled }); }
+  catch (error) { alert('Could not change interception: ' + error.message); }
+});
+
+$('bypass').addEventListener('click', () => {
+  $('bypass-text').value = state.intercept.bypass.join('\n');
+  $('bypass-error').hidden = true;
+  $('bypass-dialog').showModal();
+});
+$('bypass-cancel').addEventListener('click', () => $('bypass-dialog').close());
+$('bypass-save').addEventListener('click', async () => {
+  try {
+    await putIntercept({ bypass: $('bypass-text').value.split('\n').map(h => h.trim()).filter(h => h) });
+    $('bypass-dialog').close();
+  } catch (error) {
+    $('bypass-error').textContent = error.message;
+    $('bypass-error').hidden = false;
+  }
+});
+
 $('stop').addEventListener('click', async () => {
   if (!confirm('Stop the proxy? It finishes running exchanges, then exits and deletes the captured files.')) return;
   try { await api('stop', { method: 'POST' }); $('live').textContent = 'stopping…'; }
@@ -247,6 +294,8 @@ function listen() {
   source.onopen = () => { $('live').textContent = 'live'; };
   source.onerror = () => { $('live').textContent = source.readyState === EventSource.CLOSED ? 'disconnected' : 'reconnecting…'; };
   source.addEventListener('exchange-finished', e => fetchOne(JSON.parse(e.data).id).catch(report));
+  source.addEventListener('intercept', () => loadIntercept().catch(report));
+  source.addEventListener('bypass', () => loadIntercept().catch(report));
   source.addEventListener('capture', e => showCapture(JSON.parse(e.data).enabled));
   source.addEventListener('reset', () => loadAll().catch(report));
 }
@@ -259,6 +308,7 @@ function report(error) { $('live').textContent = 'error: ' + error.message; }
   if (!state.token) { $('live').textContent = 'no token: open the address the console printed'; return; }
   try {
     showCapture((await json('capture')).enabled);
+    await loadIntercept();
     listen();          // (first, so an exchange that finishes while the list loads is not missed)
     await loadAll();
   } catch (error) { report(error); }

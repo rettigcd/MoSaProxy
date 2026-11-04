@@ -25,7 +25,7 @@ namespace MoSaProxy;
 /// <param name="shutdown">Signalled when the drain period is over: whatever is left is aborted.</param>
 public sealed class TunnelHandler(
 	IExchangeLog log, ISessionCapture capture, ProxyOptions options, CancellationToken stopping, CancellationToken shutdown,
-	ProxyActivity activity, ResourceLimitMonitor limits, CertificateAuthority? authority = null) {
+	ProxyActivity activity, ResourceLimitMonitor limits, InterceptSettings intercept) {
 
 	/// <summary>Key in the connection's Items holding the https:// base URI of an intercepted connection.</summary>
 	public const string InterceptTargetKey = "MoSaProxy.intercept-target";
@@ -166,8 +166,7 @@ public sealed class TunnelHandler(
 		}
 	}
 
-	bool ShouldIntercept(string host) =>
-		options.Intercept && authority is not null && !options.InterceptBypass.Any(pattern => Matches(pattern, host));
+	bool ShouldIntercept(string host) => intercept.ShouldIntercept(host);
 
 	/// <summary>True when <paramref name="host"/> equals the pattern, or ends with it when the pattern starts with "*.".</summary>
 	public static bool Matches(string pattern, string host) =>
@@ -285,7 +284,7 @@ public sealed class TunnelHandler(
 			using var handshakeTimeout = CancellationTokenSource.CreateLinkedTokenSource(shutdown);
 			handshakeTimeout.CancelAfter(TimeSpan.FromSeconds(15));
 			await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions {
-				ServerCertificateSelectionCallback = (_, serverName) => authority!.GetCertificateFor(ChooseName(serverName, host)),
+				ServerCertificateSelectionCallback = (_, serverName) => intercept.Authority!.GetCertificateFor(ChooseName(serverName, host)),
 				ApplicationProtocols = protocols,
 				ClientCertificateRequired = false,
 			}, handshakeTimeout.Token);

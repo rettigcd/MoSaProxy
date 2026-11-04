@@ -50,6 +50,32 @@ Request body: `application/json`, ApiCaptureRequest
 |---|---|
 | 200 OK | `application/json` ApiCaptureState |
 
+## Intercept
+
+### `GET /api/intercept`
+
+**Whether HTTPS interception is on** (`GetIntercept`)
+
+Whether tunnels opened now are decrypted, the hosts that are never decrypted, and whether this machine trusts the root certificate that signs the decrypted connections (a client that does not trust it shows certificate errors). The certificate fields are empty until interception has been switched on once.
+
+| Response | Content |
+|---|---|
+| 200 OK | `application/json` ApiInterceptState |
+
+### `PUT /api/intercept`
+
+**Turn HTTPS interception on or off, or change the hosts it skips** (`SetIntercept`)
+
+Either field may be left out. It applies to tunnels opened from now on; a tunnel already open keeps the mode it began with. The first time interception is switched on the root certificate is made (409 if it cannot be). This never changes what the machine trusts: install the certificate in CaFile into the client's trust store yourself. Bypass replaces the whole list; entries are host names or *.suffix.
+
+Request body: `application/json`, ApiInterceptRequest
+
+| Response | Content |
+|---|---|
+| 200 OK | `application/json` ApiInterceptState |
+| 400 Bad Request | `application/problem+json` ProblemDetails |
+| 409 Conflict | `application/problem+json` ProblemDetails |
+
 ## Exchanges
 
 ### `GET /api/exchanges`
@@ -188,7 +214,7 @@ A Fiddler Session Archive of every finished exchange, or only those listed in id
 
 **Live events as exchanges are captured** (`StreamEvents`)
 
-Server-Sent Events, kept open. Each event has an id that only grows, a name and JSON data. Events: exchange-started {id}; exchange-finished {id} (the exchange can now be read); websocket-message {exchange, fromClient, type, totalBytes}; capture {enabled}; reset {} (sent when the events asked for after Last-Event-ID are no longer remembered: fetch the exchange list again). A connection with no Last-Event-ID (header, or the lastEventId query parameter) gets only what happens from then on; one with it first gets the events it missed. A comment line is sent every 15 seconds to keep the connection alive. A browser's EventSource cannot set headers, so pass the token as the token query parameter.
+Server-Sent Events, kept open. Each event has an id that only grows, a name and JSON data. Events: exchange-started {id}; exchange-finished {id} (the exchange can now be read); websocket-message {exchange, fromClient, type, totalBytes}; capture {enabled}; intercept {enabled}; bypass {hosts}; reset {} (sent when the events asked for after Last-Event-ID are no longer remembered: fetch the exchange list again). A connection with no Last-Event-ID (header, or the lastEventId query parameter) gets only what happens from then on; one with it first gets the events it missed. A comment line is sent every 15 seconds to keep the connection alive. A browser's EventSource cannot set headers, so pass the token as the token query parameter.
 
 | Response | Content |
 |---|---|
@@ -215,6 +241,23 @@ Server-Sent Events, kept open. Each event has an id that only grows, a name and 
 |---|---|
 | `items` | ExchangeSummary[] |
 | `next` | integer (int32)? |
+
+### ApiInterceptRequest
+
+| Property | Type |
+|---|---|
+| `enabled` | boolean? |
+| `bypass` | string[]? |
+
+### ApiInterceptState
+
+| Property | Type |
+|---|---|
+| `enabled` | boolean |
+| `bypass` | string[] |
+| `caTrusted` | boolean? |
+| `caSubject` | string? |
+| `caFile` | string? |
 
 ### ApiStatus
 

@@ -10,6 +10,8 @@
 <header>
   <h1>MoSaProxy</h1>
   <button id="capture" type="button" title="Turn capture on or off">Capture: …</button>
+  <button id="intercept" type="button" title="Decrypt HTTPS tunnels opened from now on (needs the proxy's root certificate to be trusted by the client)">Intercept: …</button>
+  <button id="bypass" type="button" title="Hosts that are never decrypted">Skip hosts…</button>
   <input id="filter" type="search" placeholder="Filter by URL text" aria-label="Filter by URL text">
   <span id="count" class="muted"></span>
   <span class="spacer"></span>
@@ -17,6 +19,14 @@
   <a id="export" href="#" title="Download everything captured as a .saz archive">Save .saz</a>
   <button id="stop" type="button" title="Stop the proxy">Stop proxy</button>
 </header>
+<div id="banner" role="status" hidden></div>
+<dialog id="bypass-dialog" aria-labelledby="bypass-title">
+  <h2 id="bypass-title">Hosts that are never decrypted</h2>
+  <p class="muted">One per line: a host name such as <code>bank.example</code>, or <code>*.example.com</code> for every host ending in <code>.example.com</code>. Applies to tunnels opened from now on.</p>
+  <textarea id="bypass-text" rows="8" spellcheck="false" aria-label="Hosts that are never decrypted"></textarea>
+  <p id="bypass-error" class="err" hidden></p>
+  <div class="buttons"><button id="bypass-save" type="button">Save</button> <button id="bypass-cancel" type="button">Cancel</button></div>
+</dialog>
 <main>
   <section id="list">
     <table>

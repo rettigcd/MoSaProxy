@@ -43,7 +43,9 @@ public sealed class ApiHost : IAsyncDisposable {
 
 	/// <param name="port">0 picks a free port.</param>
 	/// <param name="token">The secret; a random one is made if none is given.</param>
-	public static async Task<ApiHost> StartAsync(ProxyHost proxy, int port = 0, string? token = null) {
+	/// <param name="rootStore">Where to look to see whether the root certificate is trusted; the current Windows user's store by default (on other systems the answer is "not known").</param>
+	public static async Task<ApiHost> StartAsync(ProxyHost proxy, int port = 0, string? token = null, IRootStore? rootStore = null) {
+		rootStore ??= OperatingSystem.IsWindows() ? new WindowsUserRootStore() : null;
 		token ??= Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
 		var builder = WebApplication.CreateSlimBuilder();
 		builder.Logging.ClearProviders();
@@ -70,7 +72,7 @@ public sealed class ApiHost : IAsyncDisposable {
 		app.MapOpenApi();
 		MapUi(app);
 		var feed = new ApiEventFeed(proxy.Events);
-		MapEndpoints(app.MapGroup("/api"), proxy, feed, app.Lifetime.ApplicationStopping);
+		MapEndpoints(app.MapGroup("/api"), proxy, feed, app.Lifetime.ApplicationStopping, rootStore);
 		await app.StartAsync();
 
 		int boundPort = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First()).Port;
@@ -121,9 +123,9 @@ public sealed class ApiHost : IAsyncDisposable {
 		Serve("/app.css", "app.css", "text/css; charset=utf-8");
 	}
 
-	static void MapEndpoints(RouteGroupBuilder api, ProxyHost proxy, ApiEventFeed feed, CancellationToken stopping) {
+	static void MapEndpoints(RouteGroupBuilder api, ProxyHost proxy, ApiEventFeed feed, CancellationToken stopping, IRootStore? rootStore) {
 		api.MapGet("/status", () => new ApiStatus(
-				typeof(ApiHost).Assembly.GetName().Version?.ToString(3) ?? "0.0.0", proxy.Port, proxy.Options.Intercept, proxy.Options.EnableHttp2,
+				typeof(ApiHost).Assembly.GetName().Version?.ToString(3) ?? "0.0.0", proxy.Port, proxy.InterceptEnabled, proxy.Options.EnableHttp2,
 				proxy.CaptureEnabled, proxy.Exchanges?.Count ?? 0, proxy.CaptureRunDirectory, proxy.Options.LogPath))
 			.WithTags("Status").WithName("GetStatus").WithSummary("How the proxy is set up and what it has captured")
 			.WithDescription("The proxy's port, whether it intercepts HTTPS and offers HTTP/2, whether capture is on, how many exchanges are captured, and the capture folder and log file.");
@@ -138,6 +140,25 @@ public sealed class ApiHost : IAsyncDisposable {
 			})
 			.WithTags("Capture").WithName("SetCapture").WithSummary("Turn capture on or off")
 			.WithDescription("An exchange already running is not affected: it is captured to its end if it began while capture was on, and not at all if it began while off.");
+
+		api.MapGet("/intercept", () => InterceptState(proxy, rootStore))
+			.WithTags("Intercept").WithName("GetIntercept").WithSummary("Whether HTTPS interception is on")
+			.WithDescription("Whether tunnels opened now are decrypted, the hosts that are never decrypted, and whether this machine trusts the root certificate that signs the decrypted connections (a client that does not trust it shows certificate errors). The certificate fields are empty until interception has been switched on once.");
+
+		api.MapPut("/intercept", Results<Ok<ApiInterceptState>, ProblemHttpResult> (ApiInterceptRequest request) => {
+				// Everything is checked before anything changes.
+				if (request.Bypass is not null && request.Bypass.Select(h => h.Trim()).FirstOrDefault(h => h.Length > 0 && !ProxyHost.IsValidBypassPattern(h)) is { } bad)
+					return TypedResults.Problem($"'{bad}' is not a host name or a *.suffix pattern.", statusCode: StatusCodes.Status400BadRequest);
+				if (request.Enabled is { } enabled) {
+					try { proxy.SetInterceptEnabled(enabled); }
+					catch (InvalidOperationException ex) { return TypedResults.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict); }
+				}
+				if (request.Bypass is not null) proxy.SetInterceptBypass(request.Bypass);
+				return TypedResults.Ok(InterceptState(proxy, rootStore));
+			})
+			.ProducesProblem(StatusCodes.Status400BadRequest).ProducesProblem(StatusCodes.Status409Conflict)
+			.WithTags("Intercept").WithName("SetIntercept").WithSummary("Turn HTTPS interception on or off, or change the hosts it skips")
+			.WithDescription("Either field may be left out. It applies to tunnels opened from now on; a tunnel already open keeps the mode it began with. The first time interception is switched on the root certificate is made (409 if it cannot be). This never changes what the machine trusts: install the certificate in CaFile into the client's trust store yourself. Bypass replaces the whole list; entries are host names or *.suffix.");
 
 		api.MapGet("/exchanges", Results<Ok<ApiExchangePage>, ProblemHttpResult> (int? after, int? limit, string? host, string? method, int? status, string? mode, string? q) => {
 				int size = limit ?? DefaultPageSize;
@@ -198,7 +219,7 @@ public sealed class ApiHost : IAsyncDisposable {
 		api.MapGet("/stream", (HttpContext context, CancellationToken _) => StreamEvents(context, feed, stopping))
 			.Produces(StatusCodes.Status200OK, contentType: "text/event-stream")
 			.WithTags("Stream").WithName("StreamEvents").WithSummary("Live events as exchanges are captured")
-			.WithDescription("Server-Sent Events, kept open. Each event has an id that only grows, a name and JSON data. Events: exchange-started {id}; exchange-finished {id} (the exchange can now be read); websocket-message {exchange, fromClient, type, totalBytes}; capture {enabled}; reset {} (sent when the events asked for after Last-Event-ID are no longer remembered: fetch the exchange list again). A connection with no Last-Event-ID (header, or the lastEventId query parameter) gets only what happens from then on; one with it first gets the events it missed. A comment line is sent every 15 seconds to keep the connection alive. A browser's EventSource cannot set headers, so pass the token as the token query parameter.");
+			.WithDescription("Server-Sent Events, kept open. Each event has an id that only grows, a name and JSON data. Events: exchange-started {id}; exchange-finished {id} (the exchange can now be read); websocket-message {exchange, fromClient, type, totalBytes}; capture {enabled}; intercept {enabled}; bypass {hosts}; reset {} (sent when the events asked for after Last-Event-ID are no longer remembered: fetch the exchange list again). A connection with no Last-Event-ID (header, or the lastEventId query parameter) gets only what happens from then on; one with it first gets the events it missed. A comment line is sent every 15 seconds to keep the connection alive. A browser's EventSource cannot set headers, so pass the token as the token query parameter.");
 	}
 
 	static IResult ExportSaz(ProxyHost proxy, string? ids) {
@@ -252,6 +273,16 @@ public sealed class ApiHost : IAsyncDisposable {
 			}
 		}
 		catch (OperationCanceledException) { }       // the reader left, or the API is stopping
+	}
+
+	static ApiInterceptState InterceptState(ProxyHost proxy, IRootStore? rootStore) {
+		var authority = proxy.Authority;
+		bool? trusted = null;
+		if (authority is not null && rootStore is not null) {
+			try { trusted = new RootTrust(rootStore).Check(authority) == RootTrustState.Trusted; }
+			catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or IOException or UnauthorizedAccessException) { }
+		}
+		return new ApiInterceptState(proxy.InterceptEnabled, proxy.InterceptBypass, trusted, authority?.Root.Subject, authority?.RootCertificatePath);
 	}
 
 	static IResult BodyResult(ProxyHost proxy, int id, bool response, bool decode, HttpContext context) {

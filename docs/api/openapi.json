@@ -80,6 +80,78 @@
         }
       }
     },
+    "/api/intercept": {
+      "get": {
+        "tags": [
+          "Intercept"
+        ],
+        "summary": "Whether HTTPS interception is on",
+        "description": "Whether tunnels opened now are decrypted, the hosts that are never decrypted, and whether this machine trusts the root certificate that signs the decrypted connections (a client that does not trust it shows certificate errors). The certificate fields are empty until interception has been switched on once.",
+        "operationId": "GetIntercept",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiInterceptState"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Intercept"
+        ],
+        "summary": "Turn HTTPS interception on or off, or change the hosts it skips",
+        "description": "Either field may be left out. It applies to tunnels opened from now on; a tunnel already open keeps the mode it began with. The first time interception is switched on the root certificate is made (409 if it cannot be). This never changes what the machine trusts: install the certificate in CaFile into the client's trust store yourself. Bypass replaces the whole list; entries are host names or *.suffix.",
+        "operationId": "SetIntercept",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiInterceptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiInterceptState"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/exchanges": {
       "get": {
         "tags": [
@@ -523,7 +595,7 @@
           "Stream"
         ],
         "summary": "Live events as exchanges are captured",
-        "description": "Server-Sent Events, kept open. Each event has an id that only grows, a name and JSON data. Events: exchange-started {id}; exchange-finished {id} (the exchange can now be read); websocket-message {exchange, fromClient, type, totalBytes}; capture {enabled}; reset {} (sent when the events asked for after Last-Event-ID are no longer remembered: fetch the exchange list again). A connection with no Last-Event-ID (header, or the lastEventId query parameter) gets only what happens from then on; one with it first gets the events it missed. A comment line is sent every 15 seconds to keep the connection alive. A browser's EventSource cannot set headers, so pass the token as the token query parameter.",
+        "description": "Server-Sent Events, kept open. Each event has an id that only grows, a name and JSON data. Events: exchange-started {id}; exchange-finished {id} (the exchange can now be read); websocket-message {exchange, fromClient, type, totalBytes}; capture {enabled}; intercept {enabled}; bypass {hosts}; reset {} (sent when the events asked for after Last-Event-ID are no longer remembered: fetch the exchange list again). A connection with no Last-Event-ID (header, or the lastEventId query parameter) gets only what happens from then on; one with it first gets the events it missed. A comment line is sent every 15 seconds to keep the connection alive. A browser's EventSource cannot set headers, so pass the token as the token query parameter.",
         "operationId": "StreamEvents",
         "responses": {
           "200": {
@@ -587,6 +659,69 @@
               "string"
             ],
             "format": "int32"
+          }
+        }
+      },
+      "ApiInterceptRequest": {
+        "required": [
+          "enabled",
+          "bypass"
+        ],
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "bypass": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ApiInterceptState": {
+        "required": [
+          "enabled",
+          "bypass",
+          "caTrusted",
+          "caSubject",
+          "caFile"
+        ],
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "bypass": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "caTrusted": {
+            "type": [
+              "null",
+              "boolean"
+            ]
+          },
+          "caSubject": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "caFile": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -958,6 +1093,9 @@
     },
     {
       "name": "Capture"
+    },
+    {
+      "name": "Intercept"
     },
     {
       "name": "Exchanges"

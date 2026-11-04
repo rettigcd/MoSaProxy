@@ -36,6 +36,7 @@ Kestrel, with a connection middleware in front of it for `CONNECT` and TLS.
 | **TLS interception** (`--intercept`) | Full URL, headers, bodies, status | A local root CA mints a certificate per host. The origin's real certificate is validated; an untrusted one gives the client a 502. |
 
 - `--intercept-bypass a.com,*.b.com` keeps the listed hosts as blind tunnels (for example hosts that pin certificates).
+- **Interception can be switched while the proxy runs**, from the UI's *Intercept* button or `PUT /api/intercept`, whether or not `--intercept` was given (the option only sets the starting state). It applies to tunnels opened from then on; a tunnel already open keeps its mode. The first switch-on makes the root certificate. The switch never changes what the machine trusts: if the root is not trusted the UI says so and names the certificate file. The *Skip hosts* button edits the bypass list the same way.
 - With interception on, the first bytes of a `CONNECT` decide what it carries: a TLS handshake is decrypted, plain HTTP
   (such as `ws://` on port 80) goes to the HTTP layer, and anything else, or a silent client (3 s), is relayed blindly.
 - **The root CA** is created on first use in `--ca-dir` (default `%LOCALAPPDATA%\mos\ca`, outside the repository). At startup

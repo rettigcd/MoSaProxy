@@ -5,14 +5,18 @@ namespace MoSaProxy.Tests;
 
 /// <summary>A proxy with the local API on top of it, and a client that calls the API directly (not through the proxy) with the right token.</summary>
 public sealed class TestApi : IAsyncDisposable {
-	TestApi(TestProxy proxy, ApiHost api) {
+	TestApi(TestProxy proxy, ApiHost api, FakeRootStore rootStore) {
 		Proxy = proxy;
+		RootStore = rootStore;
 		Api = api;
 		Client = NewClient(api.Token);
 	}
 
 	public TestProxy Proxy { get; }
 	public ApiHost Api { get; }
+
+	/// <summary>The stand-in for the Windows trusted-root store that the API looks in to see whether the root certificate is trusted.</summary>
+	public FakeRootStore RootStore { get; }
 
 	/// <summary>Calls the API with the correct token.</summary>
 	public HttpClient Client { get; }
@@ -26,7 +30,8 @@ public sealed class TestApi : IAsyncDisposable {
 
 	public static async Task<TestApi> StartAsync(ProxyOptions? options = null) {
 		var proxy = await TestProxy.StartAsync(options);
-		return new TestApi(proxy, await ApiHost.StartAsync(proxy.Host));
+		var rootStore = new FakeRootStore();
+		return new TestApi(proxy, await ApiHost.StartAsync(proxy.Host, rootStore: rootStore), rootStore);
 	}
 
 	/// <summary>Makes one request through the proxy to the origin and waits until it is in the store.</summary>
